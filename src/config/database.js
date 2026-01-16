@@ -87,7 +87,5 @@ module.exports = {
     supabase,
     pool,
     query,
-    transaction
+    testConnection
 };
-
-module.exports = router;
