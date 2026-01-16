@@ -89,3 +89,5 @@ module.exports = {
     query,
     transaction
 };
+
+module.exports = router;
