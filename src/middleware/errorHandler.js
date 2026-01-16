@@ -147,4 +147,4 @@ module.exports = {
     asyncHandler
 };
 
-module.exports = router;
+module.exports = errorHandler;
