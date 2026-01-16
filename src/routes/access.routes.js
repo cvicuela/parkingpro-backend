@@ -1,0 +1,240 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate, authorize } = require('../middleware/auth');
+const accessControlService = require('../services/accessControl.service');
+const hourlyRateService = require('../services/hourlyRate.service');
+
+/**
+ * @route   POST /api/v1/access/validate
+ * @desc    Validar entrada o salida de vehículo
+ * @access  Private (Operator, Admin)
+ */
+router.post('/validate', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { vehiclePlate, type } = req.body; // type: 'entry' | 'exit'
+        
+        if (!vehiclePlate || !type) {
+            return res.status(400).json({
+                error: 'vehiclePlate y type son requeridos'
+            });
+        }
+        
+        let validationResult;
+        
+        if (type === 'entry') {
+            validationResult = await accessControlService.validateEntry(vehiclePlate);
+        } else if (type === 'exit') {
+            validationResult = await accessControlService.validateExit(vehiclePlate);
+        } else {
+            return res.status(400).json({
+                error: 'type debe ser "entry" o "exit"'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: validationResult
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/entry
+ * @desc    Registrar entrada de vehículo
+ * @access  Private (Operator, Admin)
+ */
+router.post('/entry', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { vehiclePlate, validationResult } = req.body;
+        
+        if (!vehiclePlate || !validationResult) {
+            return res.status(400).json({
+                error: 'vehiclePlate y validationResult son requeridos'
+            });
+        }
+        
+        if (!validationResult.allowed) {
+            return res.status(403).json({
+                error: 'Acceso no permitido',
+                reason: validationResult.reason
+            });
+        }
+        
+        const entry = await accessControlService.registerEntry(
+            vehiclePlate,
+            validationResult,
+            req.user.id
+        );
+        
+        res.json({
+            success: true,
+            message: 'Entrada registrada exitosamente',
+            data: entry
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/exit
+ * @desc    Registrar salida de vehículo
+ * @access  Private (Operator, Admin)
+ */
+router.post('/exit', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { vehiclePlate, validationResult } = req.body;
+        
+        if (!vehiclePlate || !validationResult) {
+            return res.status(400).json({
+                error: 'vehiclePlate y validationResult son requeridos'
+            });
+        }
+        
+        if (!validationResult.allowed) {
+            return res.status(403).json({
+                error: 'Salida no permitida',
+                reason: validationResult.reason
+            });
+        }
+        
+        const exit = await accessControlService.registerExit(
+            vehiclePlate,
+            validationResult,
+            req.user.id
+        );
+        
+        res.json({
+            success: true,
+            message: 'Salida registrada exitosamente',
+            data: exit
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/v1/access/history
+ * @desc    Obtener historial de accesos
+ * @access  Private (Admin)
+ */
+router.get('/history', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { vehiclePlate, startDate, endDate } = req.query;
+        
+        const history = await accessControlService.getAccessHistory({
+            vehiclePlate,
+            startDate,
+            endDate
+        });
+        
+        res.json({
+            success: true,
+            data: history,
+            count: history.length
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/v1/access/sessions/active
+ * @desc    Obtener sesiones activas de parqueo por hora
+ * @access  Private (Operator, Admin)
+ */
+router.get('/sessions/active', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const sessions = await hourlyRateService.getActiveSessions();
+        
+        res.json({
+            success: true,
+            data: sessions,
+            count: sessions.length
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/v1/access/sessions/:plate
+ * @desc    Buscar sesión activa por placa
+ * @access  Private (Operator, Admin)
+ */
+router.get('/sessions/:plate', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { plate } = req.params;
+        
+        const session = await hourlyRateService.findActiveSessionByPlate(plate);
+        
+        if (!session) {
+            return res.status(404).json({
+                error: 'No se encontró sesión activa para esta placa'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: session
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/sessions/:id/end
+ * @desc    Finalizar sesión de parqueo por hora
+ * @access  Private (Operator, Admin)
+ */
+router.post('/sessions/:id/end', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        
+        const result = await hourlyRateService.endParkingSession(id);
+        
+        res.json({
+            success: true,
+            message: 'Sesión finalizada',
+            data: result
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/sessions/:id/payment
+ * @desc    Registrar pago de sesión
+ * @access  Private (Operator, Admin)
+ */
+router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { paymentId, amount } = req.body;
+        
+        const session = await hourlyRateService.recordSessionPayment(id, paymentId, amount);
+        
+        res.json({
+            success: true,
+            message: 'Pago registrado',
+            data: session
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+module.exports = router;
