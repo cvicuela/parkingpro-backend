@@ -208,3 +208,5 @@ module.exports = {
     requireVerified,
     requireOwnershipOrAdmin
 };
+
+module.exports = router;
