@@ -146,3 +146,5 @@ module.exports = {
     notFound,
     asyncHandler
 };
+
+module.exports = router;
