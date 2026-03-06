@@ -20,6 +20,7 @@ const accessRoutes = require('./routes/access.routes');
 const reportRoutes = require('./routes/report.routes');
 const settingRoutes = require('./routes/setting.routes');
 const webhookRoutes = require('./routes/webhook.routes');
+const arduinoRoutes = require('./routes/arduino.routes');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -135,6 +136,7 @@ app.use('/api/v1/access', accessRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
+app.use('/api/v1/arduino', arduinoRoutes);
 
 // ==================== SPA FALLBACK ====================
 

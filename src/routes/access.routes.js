@@ -3,6 +3,7 @@ const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const accessControlService = require('../services/accessControl.service');
 const hourlyRateService = require('../services/hourlyRate.service');
+const qrcodeService = require('../services/qrcode.service');
 
 /**
  * @route   POST /api/v1/access/validate
@@ -68,11 +69,23 @@ router.post('/entry', authenticate, authorize(['operator', 'admin', 'super_admin
             validationResult,
             req.user.id
         );
-        
+
+        // Generar QR code para el ticket de entrada
+        const ticketId = entry.event?.id || entry.session?.id || Date.now().toString();
+        const qrCode = await qrcodeService.generateEntryQR({
+            ticketId,
+            plate: vehiclePlate,
+            accessType: validationResult.accessType,
+            entryTime: new Date().toISOString(),
+            planName: validationResult.subscription?.plan_name || validationResult.plan?.name,
+            customerName: validationResult.subscription?.customer_name || null
+        });
+
         res.json({
             success: true,
             message: 'Entrada registrada exitosamente',
-            data: entry
+            data: entry,
+            qrCode
         });
         
     } catch (error) {
