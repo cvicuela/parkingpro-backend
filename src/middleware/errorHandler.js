@@ -140,11 +140,7 @@ function asyncHandler(fn) {
     };
 }
 
-module.exports = {
-    AppError,
-    errorHandler,
-    notFound,
-    asyncHandler
-};
-
 module.exports = errorHandler;
+module.exports.AppError = AppError;
+module.exports.notFound = notFound;
+module.exports.asyncHandler = asyncHandler;

@@ -5,6 +5,9 @@ const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
 
 // Importar rutas
 const authRoutes = require('./routes/auth.routes');
@@ -23,12 +26,41 @@ const errorHandler = require('./middleware/errorHandler');
 
 // Inicializar app
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// ==================== SOCKET.IO ====================
+
+const io = new Server(server, {
+    cors: {
+        origin: process.env.FRONTEND_URL || '*',
+        methods: ['GET', 'POST'],
+        credentials: true
+    }
+});
+
+// Hacer io accesible desde las rutas
+app.set('io', io);
+
+io.on('connection', (socket) => {
+    console.log(`[Socket.IO] Client connected: ${socket.id}`);
+
+    socket.on('join_dashboard', () => {
+        socket.join('dashboard');
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+    });
+});
 
 // ==================== MIDDLEWARE GLOBAL ====================
 
 // Seguridad
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+}));
 
 // CORS
 app.use(cors({
@@ -54,12 +86,15 @@ app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Servir frontend estático (build de React)
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 // Rate limiting general
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minuto
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
     message: {
-        error: 'Demasiadas solicitudes, por favor intenta de nuevo más tarde'
+        error: 'Demasiadas solicitudes, por favor intenta de nuevo mas tarde'
     },
     standardHeaders: true,
     legacyHeaders: false
@@ -73,7 +108,7 @@ const authLimiter = rateLimit({
     max: 5,
     skipSuccessfulRequests: true,
     message: {
-        error: 'Demasiados intentos de autenticación, intenta en 15 minutos'
+        error: 'Demasiados intentos de autenticacion, intenta en 15 minutos'
     }
 });
 
@@ -85,14 +120,6 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         environment: process.env.NODE_ENV
-    });
-});
-
-app.get('/', (req, res) => {
-    res.json({
-        message: 'ParkingPro API v1.0',
-        docs: '/api/v1/docs',
-        health: '/health'
     });
 });
 
@@ -109,12 +136,20 @@ app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 
-// ==================== 404 HANDLER ====================
+// ==================== SPA FALLBACK ====================
 
-app.use('*', (req, res) => {
-    res.status(404).json({
-        error: 'Ruta no encontrada',
-        path: req.originalUrl
+app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+        return next();
+    }
+    const indexPath = path.join(__dirname, '..', 'public', 'index.html');
+    res.sendFile(indexPath, (err) => {
+        if (err) {
+            res.status(404).json({
+                error: 'Ruta no encontrada',
+                path: req.originalUrl
+            });
+        }
     });
 });
 
@@ -124,23 +159,20 @@ app.use(errorHandler);
 
 // ==================== INICIAR SERVIDOR ====================
 
-const server = app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`
-╔═══════════════════════════════════════════════════╗
-║                                                   ║
-║     🅿️  PARKINGPRO API SERVER                    ║
-║                                                   ║
-║     Environment: ${process.env.NODE_ENV?.padEnd(26) || 'development'.padEnd(26)}║
-║     Port:        ${PORT.toString().padEnd(26)}             ║
-║     URL:         http://localhost:${PORT.toString().padEnd(14)}     ║
-║                                                   ║
-║     Status:      ✅ Running                      ║
-║     Time:        ${new Date().toLocaleString('es-DO').padEnd(26)}║
-║                                                   ║
-╚═══════════════════════════════════════════════════╝
+=============================================
+  ParkingPro API Server
+  Environment: ${process.env.NODE_ENV || 'development'}
+  Port:        ${PORT}
+  URL:         http://localhost:${PORT}
+  Socket.IO:   Enabled
+  Status:      Running
+  Time:        ${new Date().toLocaleString('es-DO')}
+=============================================
     `);
-    
-    console.log('\n📚 Available endpoints:');
+
+    console.log('\nAvailable endpoints:');
     console.log('   GET  /health');
     console.log('   POST /api/v1/auth/register');
     console.log('   POST /api/v1/auth/login');
@@ -153,16 +185,17 @@ const server = app.listen(PORT, () => {
 // ==================== GRACEFUL SHUTDOWN ====================
 
 const gracefulShutdown = () => {
-    console.log('\n🛑 Cerrando servidor...');
-    
+    console.log('\nCerrando servidor...');
+
+    io.close();
     server.close(() => {
-        console.log('✅ Servidor cerrado correctamente');
+        console.log('Servidor cerrado correctamente');
         process.exit(0);
     });
-    
-    // Forzar cierre después de 10 segundos
+
+    // Forzar cierre despues de 10 segundos
     setTimeout(() => {
-        console.error('⚠️ Cierre forzado del servidor');
+        console.error('Cierre forzado del servidor');
         process.exit(1);
     }, 10000);
 };
@@ -173,13 +206,12 @@ process.on('SIGINT', gracefulShutdown);
 // ==================== MANEJO DE ERRORES NO CAPTURADOS ====================
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled Rejection:', reason);
-    console.error('Promise:', promise);
+    console.error('Unhandled Rejection:', reason);
 });
 
 process.on('uncaughtException', (error) => {
-    console.error('❌ Uncaught Exception:', error);
+    console.error('Uncaught Exception:', error);
     gracefulShutdown();
 });
 
-module.exports = app;
+module.exports = { app, server, io };

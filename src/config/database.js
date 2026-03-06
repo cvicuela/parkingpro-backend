@@ -16,6 +16,21 @@ async function query(text, params) {
     return res;
 }
 
+async function transaction(callback) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await callback(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 async function testConnection() {
     try {
         await pool.query('SELECT NOW()');
@@ -30,5 +45,6 @@ module.exports = {
     supabase,
     pool,
     query,
+    transaction,
     testConnection
 };
