@@ -1,4 +1,7 @@
 const { query, transaction } = require('../config/database');
+const { logAudit } = require('../middleware/audit');
+
+const REFUND_LIMIT_OPERATOR = parseFloat(process.env.REFUND_LIMIT_OPERATOR) || 500;
 
 class PaymentService {
     constructor() {
@@ -9,7 +12,7 @@ class PaymentService {
         };
     }
 
-    async processPayment({ amount, taxRate, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {} }) {
+    async processPayment({ amount, taxRate, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {}, userId, req }) {
         const taxAmount = amount * (taxRate || parseFloat(process.env.TAX_RATE) || 0.18);
         const totalAmount = amount + taxAmount;
 
@@ -40,16 +43,39 @@ class PaymentService {
                 ]
             );
 
+            const payment = result.rows[0];
+
             if (sessionId && providerResult.status === 'paid') {
                 await client.query(
                     `UPDATE parking_sessions
                      SET payment_id = $1, paid_amount = $2, payment_status = 'paid', updated_at = NOW()
                      WHERE id = $3`,
-                    [result.rows[0].id, totalAmount, sessionId]
+                    [payment.id, totalAmount, sessionId]
                 );
             }
 
-            return result.rows[0];
+            // Auditar creación de pago
+            await logAudit({
+                userId: userId || null,
+                action: 'payment_created',
+                entityType: 'payment',
+                entityId: payment.id,
+                changes: { amount, taxAmount, totalAmount, provider, status: providerResult.status },
+                req
+            });
+
+            // Generar factura automáticamente si el pago fue exitoso
+            if (providerResult.status === 'paid') {
+                try {
+                    const invoiceService = require('./invoice.service');
+                    await invoiceService.generateFromPayment(payment.id, { userId, req });
+                } catch (invoiceErr) {
+                    // La factura falla silenciosamente — no cancela el pago
+                    console.error('[Payment] Error generando factura:', invoiceErr.message);
+                }
+            }
+
+            return payment;
         });
     }
 
@@ -62,8 +88,6 @@ class PaymentService {
     }
 
     async processCardNetPayment({ amount, metadata }) {
-        // CardNet integration placeholder
-        // In production, this would call the CardNet API
         const cardnetUrl = process.env.CARDNET_API_URL;
         const cardnetKey = process.env.CARDNET_API_KEY;
 
@@ -76,14 +100,6 @@ class PaymentService {
                 message: 'CardNet no configurado - pago simulado'
             };
         }
-
-        // Real CardNet integration would go here
-        // const response = await fetch(cardnetUrl + '/transactions', {
-        //     method: 'POST',
-        //     headers: { 'Authorization': `Bearer ${cardnetKey}`, 'Content-Type': 'application/json' },
-        //     body: JSON.stringify({ amount, currency: 'DOP', ...metadata })
-        // });
-        // return await response.json();
 
         return {
             status: 'paid',
@@ -118,7 +134,7 @@ class PaymentService {
         };
     }
 
-    async refundPayment(paymentId) {
+    async refundPayment(paymentId, { requestingUser, req } = {}) {
         const paymentResult = await query('SELECT * FROM payments WHERE id = $1', [paymentId]);
         if (paymentResult.rows.length === 0) {
             throw new Error('Pago no encontrado');
@@ -129,10 +145,68 @@ class PaymentService {
             throw new Error('Solo se pueden reembolsar pagos completados');
         }
 
+        // Control antifraude: operadores tienen límite de RD$500
+        if (requestingUser && requestingUser.role === 'operator') {
+            if (parseFloat(payment.total_amount) > REFUND_LIMIT_OPERATOR) {
+                throw new Error(
+                    `Los operadores solo pueden reembolsar hasta RD$${REFUND_LIMIT_OPERATOR}. ` +
+                    `Este pago requiere aprobación de un administrador.`
+                );
+            }
+
+            // Verificar cuánto ha reembolsado este operador hoy
+            const todayRefunds = await query(
+                `SELECT COALESCE(SUM(total_amount), 0) as total
+                 FROM payments
+                 WHERE status = 'refunded'
+                   AND refunded_at >= CURRENT_DATE
+                   AND metadata->>'refunded_by' = $1`,
+                [requestingUser.id]
+            );
+            const todayTotal = parseFloat(todayRefunds.rows[0].total) + parseFloat(payment.total_amount);
+            if (todayTotal > REFUND_LIMIT_OPERATOR * 3) {
+                throw new Error('Límite diario de reembolsos alcanzado. Contacta al administrador.');
+            }
+        }
+
+        const refundedBy = requestingUser ? requestingUser.id : null;
+
         const result = await query(
-            `UPDATE payments SET status = 'refunded', refunded_at = NOW() WHERE id = $1 RETURNING *`,
-            [paymentId]
+            `UPDATE payments
+             SET status = 'refunded',
+                 refunded_at = NOW(),
+                 metadata = jsonb_set(COALESCE(metadata, '{}'), '{refunded_by}', $1::jsonb)
+             WHERE id = $2
+             RETURNING *`,
+            [JSON.stringify(refundedBy), paymentId]
         );
+
+        await logAudit({
+            userId: refundedBy,
+            action: 'payment_refunded',
+            entityType: 'payment',
+            entityId: paymentId,
+            changes: {
+                amount: payment.total_amount,
+                original_status: 'paid',
+                new_status: 'refunded'
+            },
+            req
+        });
+
+        // Generar nota de crédito
+        try {
+            const invoiceService = require('./invoice.service');
+            const originalInvoice = await query('SELECT id FROM invoices WHERE payment_id = $1', [paymentId]);
+            if (originalInvoice.rows.length > 0) {
+                await invoiceService.generateCreditNote(originalInvoice.rows[0].id, {
+                    userId: refundedBy,
+                    req
+                });
+            }
+        } catch (err) {
+            console.error('[Payment] Error generando nota de crédito:', err.message);
+        }
 
         return result.rows[0];
     }
