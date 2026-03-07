@@ -2,9 +2,17 @@ const { query, transaction } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 const nodemailer = require('nodemailer');
 
-// Parámetros de negocio
-const CASH_DIFF_THRESHOLD = parseFloat(process.env.CASH_DIFF_THRESHOLD) || 200;  // RD$200
-const ALERT_EMAIL = process.env.ALERT_EMAIL || 'alonsoveloz@gmail.com';
+// Helper: leer setting de la DB con fallback
+async function getSetting(key, fallback) {
+    try {
+        const result = await query(`SELECT value FROM settings WHERE key = $1`, [key]);
+        if (result.rows.length > 0) {
+            const v = result.rows[0].value;
+            return typeof v === 'string' ? v : JSON.stringify(v);
+        }
+    } catch {}
+    return fallback;
+}
 
 class CashRegisterService {
 
@@ -130,7 +138,8 @@ class CashRegisterService {
         const { total_in, total_out } = totalsResult.rows[0];
         const expectedBalance = parseFloat(total_in) - parseFloat(total_out);
         const difference = parseFloat(countedBalance) - expectedBalance;
-        const requiresApproval = Math.abs(difference) > CASH_DIFF_THRESHOLD;
+        const threshold = parseFloat(await getSetting('cash_diff_threshold', '200'));
+        const requiresApproval = Math.abs(difference) > threshold;
 
         return await transaction(async (client) => {
             // Guardar desglose por denominación
@@ -237,15 +246,15 @@ class CashRegisterService {
 
         if (operatorId) {
             params.push(operatorId);
-            whereClause += ` AND cr.operator_id = $${params.length}`;
+            whereClause += ` AND operator_email = (SELECT email FROM users WHERE id = $${params.length})`;
         }
         if (startDate) {
             params.push(startDate);
-            whereClause += ` AND cr.opened_at >= $${params.length}`;
+            whereClause += ` AND opened_at >= $${params.length}`;
         }
         if (endDate) {
             params.push(endDate);
-            whereClause += ` AND cr.opened_at <= $${params.length}`;
+            whereClause += ` AND opened_at <= $${params.length}`;
         }
 
         params.push(limit, offset);
@@ -263,7 +272,7 @@ class CashRegisterService {
 
     async getTransactions(registerId) {
         const result = await query(
-            `SELECT crt.*, u.first_name || ' ' || u.last_name as operator_name
+            `SELECT crt.*, u.email as operator_name
              FROM cash_register_transactions crt
              LEFT JOIN users u ON crt.operator_id = u.id
              WHERE crt.cash_register_id = $1
@@ -296,7 +305,7 @@ class CashRegisterService {
             const tipo = difference < 0 ? 'FALTANTE' : 'SOBRANTE';
             await transporter.sendMail({
                 from: smtpUser,
-                to: ALERT_EMAIL,
+                to: await getSetting('alert_email', 'alonsoveloz@gmail.com'),
                 subject: `[ParkingPro] Alerta de Caja: ${tipo} de RD$${Math.abs(difference).toFixed(2)}`,
                 html: `
                     <h2>Alerta de Cuadre de Caja</h2>

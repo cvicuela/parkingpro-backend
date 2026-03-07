@@ -4,7 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const cashRegisterService = require('../services/cashRegister.service');
 
-const REFUND_LIMIT_OPERATOR = parseFloat(process.env.REFUND_LIMIT_OPERATOR) || 500; // RD$500
+const { query: dbQuery } = require('../config/database');
 
 // ── APERTURA DE CAJA ─────────────────────────────────────────────────────────
 router.post('/open', authenticate, authorize(['operator', 'admin', 'super_admin']), auditMiddleware('cash_register'), async (req, res, next) => {
@@ -97,15 +97,27 @@ router.post('/:id/approve', authenticate, authorize(['admin', 'super_admin']), a
 });
 
 // ── INFO DE LÍMITES (para que el frontend sepa los umbrales) ─────────────────
-router.get('/limits', authenticate, async (req, res) => {
-    res.json({
-        success: true,
-        data: {
-            cashDiffThreshold: parseFloat(process.env.CASH_DIFF_THRESHOLD) || 200,
-            refundLimitOperator: REFUND_LIMIT_OPERATOR,
-            currency: 'DOP'
-        }
-    });
+router.get('/limits', authenticate, async (req, res, next) => {
+    try {
+        const result = await dbQuery(
+            `SELECT key, value FROM settings WHERE key IN ('cash_diff_threshold', 'refund_limit_operator', 'currency')`
+        );
+        const map = {};
+        result.rows.forEach(r => {
+            const v = typeof r.value === 'string' ? r.value : JSON.stringify(r.value);
+            map[r.key] = v;
+        });
+        res.json({
+            success: true,
+            data: {
+                cashDiffThreshold: parseFloat(map.cash_diff_threshold) || 200,
+                refundLimitOperator: parseFloat(map.refund_limit_operator) || 500,
+                currency: map.currency || 'DOP'
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
 });
 
 module.exports = router;
