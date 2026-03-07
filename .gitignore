@@ -16,3 +16,4 @@ coverage/
 *.swo
 *~
 .docker/
+.vercel/
