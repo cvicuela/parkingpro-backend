@@ -182,7 +182,7 @@ class InvoiceService {
 
     async _nextInvoiceNumber() {
         const result = await query(
-            `SELECT COALESCE(MAX(invoice_number), 0) + 1 as next_number FROM invoices`
+            `SELECT COALESCE(MAX(CAST(invoice_number AS INTEGER)), 0) + 1 as next_number FROM invoices`
         );
         return result.rows[0].next_number;
     }

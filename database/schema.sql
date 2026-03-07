@@ -464,6 +464,65 @@ CREATE TABLE settings (
 
 CREATE INDEX idx_settings_key ON settings(key);
 CREATE INDEX idx_settings_category ON settings(category);
+-- ============================================
+-- TABLAS DE CUADRE DE CAJA
+-- ============================================
+
+CREATE TABLE cash_registers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL DEFAULT 'Caja Principal',
+    operator_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'closed' CHECK (status IN ('open', 'closed')),
+    opened_at TIMESTAMP,
+    opening_balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    opened_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    closed_at TIMESTAMP,
+    expected_balance DECIMAL(10,2),
+    counted_balance DECIMAL(10,2),
+    difference DECIMAL(10,2),
+    requires_approval BOOLEAN DEFAULT FALSE,
+    approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMP,
+    approval_notes TEXT,
+    notes TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_cash_registers_operator ON cash_registers(operator_id);
+CREATE INDEX idx_cash_registers_status ON cash_registers(status);
+CREATE INDEX idx_cash_registers_opened_at ON cash_registers(opened_at);
+
+CREATE TABLE cash_register_transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cash_register_id UUID NOT NULL REFERENCES cash_registers(id) ON DELETE CASCADE,
+    type VARCHAR(30) NOT NULL CHECK (type IN ('payment','refund','opening_float','manual_in','manual_out','adjustment')),
+    amount DECIMAL(10,2) NOT NULL,
+    direction VARCHAR(10) NOT NULL CHECK (direction IN ('in', 'out')),
+    payment_id UUID REFERENCES payments(id) ON DELETE SET NULL,
+    parking_session_id UUID REFERENCES parking_sessions(id) ON DELETE SET NULL,
+    operator_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    description TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_cash_txn_register ON cash_register_transactions(cash_register_id);
+CREATE INDEX idx_cash_txn_type ON cash_register_transactions(type);
+CREATE INDEX idx_cash_txn_payment ON cash_register_transactions(payment_id);
+
+CREATE TABLE denomination_counts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cash_register_id UUID NOT NULL REFERENCES cash_registers(id) ON DELETE CASCADE,
+    denomination DECIMAL(10,2) NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    subtotal DECIMAL(10,2) GENERATED ALWAYS AS (denomination * quantity) STORED,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_denomination_register ON denomination_counts(cash_register_id);
+
 
 CREATE TABLE audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
