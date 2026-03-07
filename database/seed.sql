@@ -432,7 +432,18 @@ INSERT INTO settings (key, value, description, category) VALUES
 
 ('notifications.whatsapp_enabled', 'true', 'Habilitar notificaciones WhatsApp', 'notifications'),
 ('notifications.email_enabled', 'true', 'Habilitar notificaciones Email', 'notifications'),
-('notifications.sms_enabled', 'false', 'Habilitar notificaciones SMS', 'notifications');
+('notifications.sms_enabled', 'false', 'Habilitar notificaciones SMS', 'notifications'),
+
+('cash.diff_threshold', '200', 'Umbral diferencia de caja para aprobación supervisor (RD$)', 'cash'),
+('cash.refund_limit_operator', '500', 'Monto máximo reembolso operador sin aprobación (RD$)', 'cash'),
+('cash.refund_daily_multiplier', '3', 'Multiplicador límite diario reembolsos', 'cash'),
+('cash.multi_register_enabled', 'false', 'Permitir múltiples cajas simultáneas', 'cash'),
+('cash.alert_email', 'alonsoveloz@gmail.com', 'Email para alertas de caja', 'cash'),
+('invoice.ncf_series_consumer', 'B01', 'Serie NCF consumidor final (provisional)', 'invoice'),
+('invoice.ncf_series_fiscal', 'B14', 'Serie NCF valor fiscal (provisional)', 'invoice'),
+('invoice.ncf_series_credit', 'B04', 'Serie NCF notas de crédito (provisional)', 'invoice'),
+('invoice.business_name', 'ParkingPro', 'Nombre del negocio en facturas', 'invoice'),
+('invoice.business_rnc', '', 'RNC del negocio (completar en producción)', 'invoice');
 
 -- ============================================
 -- ACTUALIZAR OCUPACIÓN DE PLANES
@@ -472,4 +483,6 @@ SELECT 'Access Events', COUNT(*) FROM access_events
 UNION ALL
 SELECT 'Parking Sessions', COUNT(*) FROM parking_sessions
 UNION ALL
-SELECT 'Settings', COUNT(*) FROM settings;
+SELECT 'Settings', COUNT(*) FROM settings
+UNION ALL
+SELECT 'Cash Registers', COUNT(*) FROM cash_registers;

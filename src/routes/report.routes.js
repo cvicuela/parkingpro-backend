@@ -103,7 +103,7 @@ router.get('/active-vehicles', authenticate, authorize(['operator', 'admin', 'su
                 ps.entry_time,
                 'hourly' as access_type,
                 EXTRACT(EPOCH FROM (NOW() - ps.entry_time)) / 60 as minutes_elapsed,
-                ps.current_amount
+                ps.calculated_amount
              FROM parking_sessions ps
              LEFT JOIN vehicles v ON v.plate = ps.vehicle_plate
              LEFT JOIN plans p ON ps.plan_id = p.id

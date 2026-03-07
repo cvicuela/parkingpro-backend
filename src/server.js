@@ -21,6 +21,9 @@ const reportRoutes = require('./routes/report.routes');
 const settingRoutes = require('./routes/setting.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const arduinoRoutes = require('./routes/arduino.routes');
+const cashRegisterRoutes = require('./routes/cashRegister.routes');
+const invoiceRoutes = require('./routes/invoice.routes');
+const auditRoutes = require('./routes/audit.routes');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -137,6 +140,9 @@ app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/arduino', arduinoRoutes);
+app.use('/api/v1/cash-registers', cashRegisterRoutes);
+app.use('/api/v1/invoices', invoiceRoutes);
+app.use('/api/v1/audit', auditRoutes);
 
 // ==================== SPA FALLBACK ====================
 
@@ -216,4 +222,7 @@ process.on('uncaughtException', (error) => {
     gracefulShutdown();
 });
 
-module.exports = { app, server, io };
+module.exports = app;
+module.exports.app = app;
+module.exports.server = server;
+module.exports.io = io;
