@@ -238,6 +238,27 @@ router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin
         const { paymentId, amount } = req.body;
         
         const session = await hourlyRateService.recordSessionPayment(id, paymentId, amount);
+// After line: const session = await hourlyRateService.recordSessionPayment(id, paymentId, amount);
+// Add cash register integration
+
+        // Registrar cobro en la caja abierta del operador (si existe)
+        try {
+            const cashRegisterService = require('../services/cashRegister.service');
+            const activeRegister = await cashRegisterService.getActiveRegister(req.user.id);
+            if (activeRegister) {
+                await cashRegisterService.recordPayment({
+                    registerId: activeRegister.id,
+                    paymentId: paymentId || null,
+                    amount: parseFloat(amount),
+                    sessionId: id,
+                    operatorId: req.user.id,
+                    description: `Cobro sesión estacionamiento`,
+                    req
+                });
+            }
+        } catch (cashErr) {
+            console.error('[Access] Error registrando en caja:', cashErr.message);
+        }
         
         res.json({
             success: true,
