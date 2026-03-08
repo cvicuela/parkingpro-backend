@@ -32,6 +32,32 @@ router.get('/cards/pool-stats', authenticate, authorize(['operator', 'admin', 's
 });
 
 /**
+ * @route   GET /api/v1/rfid/cards/by-customer/:customerId
+ * @desc    List all RFID cards for a customer
+ */
+router.get('/cards/by-customer/:customerId', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const data = await rfidService.listCardsByCustomer(req.params.customerId);
+        res.json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/v1/rfid/cards/by-subscription/:subscriptionId
+ * @desc    List all RFID cards for a subscription
+ */
+router.get('/cards/by-subscription/:subscriptionId', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const data = await rfidService.listCardsBySubscription(req.params.subscriptionId);
+        res.json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * @route   GET /api/v1/rfid/cards/:id
  * @desc    Get RFID card by ID
  */
