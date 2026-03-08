@@ -202,6 +202,7 @@ class RFIDService {
 
     /**
      * Asignar tarjeta permanente a una suscripción
+     * Supports multiple cards per subscription via rfid_cards.subscription_id (many-to-one)
      */
     async assignPermanentCard(cardId, subscriptionId) {
         return await transaction(async (client) => {
@@ -232,7 +233,7 @@ class RFIDService {
             }
             const subscription = subResult.rows[0];
 
-            // Actualizar tarjeta
+            // Actualizar tarjeta con subscription_id y customer_id (many-to-one)
             const updatedCard = await client.query(
                 `UPDATE rfid_cards
                  SET status = 'assigned',
@@ -243,14 +244,6 @@ class RFIDService {
                  WHERE id = $3
                  RETURNING *`,
                 [subscriptionId, subscription.customer_id, cardId]
-            );
-
-            // Actualizar suscripción con referencia a la tarjeta
-            await client.query(
-                `UPDATE subscriptions
-                 SET rfid_card_id = $1, updated_at = NOW()
-                 WHERE id = $2`,
-                [cardId, subscriptionId]
             );
 
             return updatedCard.rows[0];
@@ -482,15 +475,7 @@ class RFIDService {
                 throw new Error('La tarjeta no está vinculada a ninguna suscripción');
             }
 
-            // Limpiar referencia en suscripción
-            await client.query(
-                `UPDATE subscriptions
-                 SET rfid_card_id = NULL, updated_at = NOW()
-                 WHERE id = $1`,
-                [card.subscription_id]
-            );
-
-            // Limpiar tarjeta
+            // Limpiar tarjeta (subscription_id y customer_id)
             const result = await client.query(
                 `UPDATE rfid_cards
                  SET status = 'available',
@@ -589,6 +574,40 @@ class RFIDService {
             message: 'Tarjeta no está asignada a ningún usuario o sesión',
             card
         };
+    }
+
+    /**
+     * Listar tarjetas RFID por cliente
+     */
+    async listCardsByCustomer(customerId) {
+        const result = await query(
+            `SELECT rc.*,
+                    s.id as subscription_id,
+                    s.status as subscription_status,
+                    p.name as plan_name,
+                    p.type as plan_type
+             FROM rfid_cards rc
+             LEFT JOIN subscriptions s ON rc.subscription_id = s.id
+             LEFT JOIN plans p ON s.plan_id = p.id
+             WHERE rc.customer_id = $1
+             ORDER BY rc.created_at DESC`,
+            [customerId]
+        );
+        return result.rows;
+    }
+
+    /**
+     * Listar tarjetas RFID por suscripción
+     */
+    async listCardsBySubscription(subscriptionId) {
+        const result = await query(
+            `SELECT rc.*
+             FROM rfid_cards rc
+             WHERE rc.subscription_id = $1
+             ORDER BY rc.created_at DESC`,
+            [subscriptionId]
+        );
+        return result.rows;
     }
 }
 

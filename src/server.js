@@ -25,6 +25,7 @@ const cashRegisterRoutes = require('./routes/cashRegister.routes');
 const invoiceRoutes = require('./routes/invoice.routes');
 const auditRoutes = require('./routes/audit.routes');
 const rfidRoutes = require('./routes/rfid.routes');
+const userRoutes = require('./routes/user.routes');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -145,6 +146,7 @@ app.use('/api/v1/cash-registers', cashRegisterRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/rfid', rfidRoutes);
+app.use('/api/v1/users', userRoutes);
 
 // ==================== SPA FALLBACK ====================
 

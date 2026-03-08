@@ -443,7 +443,11 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('invoice.ncf_series_fiscal', 'B14', 'Serie NCF valor fiscal (provisional)', 'invoice'),
 ('invoice.ncf_series_credit', 'B04', 'Serie NCF notas de crédito (provisional)', 'invoice'),
 ('invoice.business_name', 'ParkingPro', 'Nombre del negocio en facturas', 'invoice'),
-('invoice.business_rnc', '', 'RNC del negocio (completar en producción)', 'invoice');
+('invoice.business_rnc', '', 'RNC del negocio (completar en producción)', 'invoice'),
+
+('terminal_sequence_start', '1', 'Numero inicial del rango de comprobantes del terminal', 'facturacion'),
+('terminal_sequence_end', '999999', 'Numero final del rango de comprobantes del terminal', 'facturacion'),
+('terminal_sequence_current', '1', 'Proximo numero de comprobante a emitir', 'facturacion');
 
 -- ============================================
 -- ACTUALIZAR OCUPACIÓN DE PLANES
