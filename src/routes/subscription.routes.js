@@ -10,19 +10,42 @@ const { query, supabase } = require('../config/database');
  */
 router.get('/', authenticate, async (req, res, next) => {
     try {
-        const result = await query(
-            `SELECT 
+        const { search, status } = req.query;
+        let sql = `SELECT
                 s.*,
                 c.first_name || ' ' || c.last_name as customer_name,
-                v.plate,
-                p.name as plan_name
+                c.phone as customer_phone,
+                c.email as customer_email,
+                c.id_document as customer_document,
+                v.plate as vehicle_plate,
+                v.make as vehicle_make,
+                v.model as vehicle_model,
+                p.name as plan_name,
+                p.base_price as plan_price
              FROM subscriptions s
              JOIN customers c ON s.customer_id = c.id
-             JOIN vehicles v ON s.vehicle_id = v.id
-             JOIN plans p ON s.plan_id = p.id
-             ORDER BY s.created_at DESC`
-        );
-        
+             LEFT JOIN vehicles v ON s.vehicle_id = v.id
+             JOIN plans p ON s.plan_id = p.id`;
+
+        const params = [];
+        const conditions = [];
+
+        if (search) {
+            params.push(`%${search}%`);
+            conditions.push(`(c.first_name || ' ' || c.last_name ILIKE $${params.length} OR v.plate ILIKE $${params.length})`);
+        }
+        if (status) {
+            params.push(status);
+            conditions.push(`s.status = $${params.length}`);
+        }
+
+        if (conditions.length > 0) {
+            sql += ' WHERE ' + conditions.join(' AND ');
+        }
+        sql += ' ORDER BY s.created_at DESC';
+
+        const result = await query(sql, params);
+
         res.json({
             success: true,
             data: result.rows
