@@ -18,6 +18,7 @@ CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded', 'ch
 CREATE TYPE access_event_type AS ENUM ('entry', 'exit');
 CREATE TYPE plan_type AS ENUM ('diurno', 'nocturno', '24h', 'hourly');
 CREATE TYPE billing_frequency AS ENUM ('monthly', 'weekly', 'hourly');
+CREATE TYPE session_status AS ENUM ('active', 'paid', 'closed', 'abandoned');
 
 -- ============================================
 -- TABLAS DE USUARIOS Y AUTENTICACIÓN
@@ -402,7 +403,7 @@ CREATE TABLE parking_sessions (
     assigned_spot VARCHAR(10),
     
     -- Estado
-    is_active BOOLEAN DEFAULT TRUE,
+    status session_status DEFAULT 'active',
     
     -- Metadata
     metadata JSONB,
@@ -412,7 +413,7 @@ CREATE TABLE parking_sessions (
 
 CREATE INDEX idx_parking_sessions_plate ON parking_sessions(vehicle_plate);
 CREATE INDEX idx_parking_sessions_customer_id ON parking_sessions(customer_id);
-CREATE INDEX idx_parking_sessions_is_active ON parking_sessions(is_active);
+CREATE INDEX idx_parking_sessions_status ON parking_sessions(status);
 CREATE INDEX idx_parking_sessions_entry_time ON parking_sessions(entry_time);
 
 CREATE TABLE incidents (
@@ -722,5 +723,5 @@ SELECT
 FROM parking_sessions ps
 LEFT JOIN customers c ON ps.customer_id = c.id
 JOIN plans p ON ps.plan_id = p.id
-WHERE ps.is_active = TRUE
+WHERE ps.status = 'active'
 ORDER BY ps.entry_time DESC;

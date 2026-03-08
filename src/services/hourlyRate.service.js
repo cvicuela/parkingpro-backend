@@ -149,8 +149,8 @@ class HourlyRateService {
         const result = await query(
             `INSERT INTO parking_sessions (
                 vehicle_plate, plan_id, customer_id, assigned_spot,
-                entry_time, is_active
-            ) VALUES ($1, $2, $3, $4, NOW(), true)
+                entry_time, status
+            ) VALUES ($1, $2, $3, $4, NOW(), 'active')
             RETURNING *`,
             [vehiclePlate, planId, customerId, assignedSpot]
         );
@@ -164,7 +164,7 @@ class HourlyRateService {
     async endParkingSession(sessionId, exitTime = new Date()) {
         // Obtener sesión
         const sessionResult = await query(
-            `SELECT * FROM parking_sessions WHERE id = $1 AND is_active = true`,
+            `SELECT * FROM parking_sessions WHERE id = $1 AND status = 'active'`,
             [sessionId]
         );
         
@@ -190,7 +190,7 @@ class HourlyRateService {
              SET exit_time = $1,
                  duration_minutes = $2,
                  calculated_amount = $3,
-                 is_active = false,
+                 status = 'closed',
                  updated_at = NOW()
              WHERE id = $4
              RETURNING *`,
@@ -216,7 +216,7 @@ class HourlyRateService {
              FROM parking_sessions ps
              JOIN plans p ON ps.plan_id = p.id
              LEFT JOIN customers c ON ps.customer_id = c.id
-             WHERE ps.is_active = true
+             WHERE ps.status = 'active'
              ORDER BY ps.entry_time DESC`
         );
         
@@ -243,7 +243,7 @@ class HourlyRateService {
     async findActiveSessionByPlate(vehiclePlate) {
         const result = await query(
             `SELECT * FROM parking_sessions 
-             WHERE vehicle_plate = $1 AND is_active = true
+             WHERE vehicle_plate = $1 AND status = 'active'
              ORDER BY entry_time DESC
              LIMIT 1`,
             [vehiclePlate]
@@ -278,6 +278,7 @@ class HourlyRateService {
              SET payment_id = $1,
                  paid_amount = $2,
                  payment_status = 'paid',
+                 status = 'paid',
                  updated_at = NOW()
              WHERE id = $3
              RETURNING *`,
@@ -302,7 +303,7 @@ class HourlyRateService {
              FROM parking_sessions
              WHERE entry_time >= $1 
                AND entry_time <= $2
-               AND is_active = false`,
+               AND status IN ('paid', 'closed')`,
             [startDate, endDate]
         );
         
