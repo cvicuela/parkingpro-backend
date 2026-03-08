@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query, transaction, supabase } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 
 const REFUND_LIMIT_OPERATOR = parseFloat(process.env.REFUND_LIMIT_OPERATOR) || 500;
@@ -134,7 +134,7 @@ class PaymentService {
         };
     }
 
-    async refundPayment(paymentId, { requestingUser, req } = {}) {
+    async refundPayment(paymentId, { requestingUser, reason, req } = {}) {
         const paymentResult = await query('SELECT * FROM payments WHERE id = $1', [paymentId]);
         if (paymentResult.rows.length === 0) {
             throw new Error('Pago no encontrado');
@@ -171,15 +171,17 @@ class PaymentService {
 
         const refundedBy = requestingUser ? requestingUser.id : null;
 
-        const result = await query(
-            `UPDATE payments
-             SET status = 'refunded',
-                 refunded_at = NOW(),
-                 metadata = jsonb_set(COALESCE(metadata, '{}'), '{refunded_by}', $1::jsonb)
-             WHERE id = $2
-             RETURNING *`,
-            [JSON.stringify(refundedBy), paymentId]
-        );
+        // Call the Supabase RPC refund_payment with p_reason parameter
+        const token = process.env.SUPABASE_SERVICE_KEY;
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('refund_payment', {
+            p_token: token,
+            p_id: paymentId,
+            p_reason: reason || null
+        });
+
+        if (rpcError) {
+            throw new Error(`Error al procesar reembolso: ${rpcError.message}`);
+        }
 
         await logAudit({
             userId: refundedBy,
@@ -189,7 +191,8 @@ class PaymentService {
             changes: {
                 amount: payment.total_amount,
                 original_status: 'paid',
-                new_status: 'refunded'
+                new_status: 'refunded',
+                reason: reason || null
             },
             req
         });
@@ -208,7 +211,9 @@ class PaymentService {
             console.error('[Payment] Error generando nota de crédito:', err.message);
         }
 
-        return result.rows[0];
+        // Return the updated payment (re-fetch after RPC)
+        const updated = await query('SELECT * FROM payments WHERE id = $1', [paymentId]);
+        return updated.rows[0];
     }
 }
 

@@ -58,8 +58,10 @@ router.get('/:id', authenticate, authorize(['operator', 'admin', 'super_admin'])
 
 router.post('/:id/refund', authenticate, authorize(['operator', 'admin', 'super_admin']), auditMiddleware('payment_refund'), async (req, res, next) => {
     try {
+        const { reason } = req.body;
         const refunded = await paymentService.refundPayment(req.params.id, {
             requestingUser: req.user,
+            reason: reason || null,
             req
         });
         res.json({ success: true, data: refunded });

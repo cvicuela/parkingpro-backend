@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
+const { supabase } = require('../config/database');
 const accessControlService = require('../services/accessControl.service');
 const hourlyRateService = require('../services/hourlyRate.service');
 const qrcodeService = require('../services/qrcode.service');
@@ -266,6 +267,78 @@ router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin
             data: session
         });
         
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/v1/access/sessions/suspicious/list
+ * @desc    Listar sesiones sospechosas (duración excesiva o sin pago)
+ * @access  Private (Admin)
+ */
+router.get('/sessions/suspicious/list', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { thresholdHours } = req.query;
+        const threshold = parseInt(thresholdHours) || 24;
+
+        const token = process.env.SUPABASE_SERVICE_KEY;
+        const { data, error } = await supabase.rpc('list_suspicious_sessions', {
+            p_token: token,
+            p_threshold_hours: threshold
+        });
+
+        if (error) {
+            throw new Error(`Error al listar sesiones sospechosas: ${error.message}`);
+        }
+
+        res.json({
+            success: true,
+            data: data || [],
+            count: (data || []).length
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/sessions/auto-close-stale
+ * @desc    Cerrar automáticamente sesiones inactivas por más de X horas
+ * @access  Private (Admin)
+ */
+router.post('/sessions/auto-close-stale', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { thresholdHours } = req.body;
+        const threshold = parseInt(thresholdHours) || 48;
+
+        const token = process.env.SUPABASE_SERVICE_KEY;
+        const { data, error } = await supabase.rpc('auto_close_stale_sessions', {
+            p_token: token,
+            p_threshold_hours: threshold
+        });
+
+        if (error) {
+            throw new Error(`Error al cerrar sesiones inactivas: ${error.message}`);
+        }
+
+        const closedSessions = data || [];
+
+        // Emit socket event for dashboard
+        const io = req.app.get('io');
+        if (io && closedSessions.length > 0) {
+            io.to('dashboard').emit('stale_sessions_closed', {
+                count: closedSessions.length,
+                time: new Date().toISOString()
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `${closedSessions.length} sesiones cerradas automáticamente`,
+            data: closedSessions,
+            count: closedSessions.length
+        });
     } catch (error) {
         next(error);
     }
