@@ -184,4 +184,101 @@ router.get('/status', (req, res) => {
     });
 });
 
+/**
+ * @route   POST /api/v1/arduino/rfid-scan
+ * @desc    Arduino reports RFID card scan at entry/exit barrier
+ *          The backend resolves the card, validates access, and responds with barrier commands
+ */
+router.post('/rfid-scan', authenticateArduino, async (req, res, next) => {
+    try {
+        const { deviceId, cardUid, location } = req.body;
+        // location: 'entry' | 'exit'
+
+        if (!cardUid || !location) {
+            return res.json({
+                success: false,
+                command: arduinoService.generateBarrierCommand(null)
+            });
+        }
+
+        // Use the unified access resolution with RFID priority
+        const validationResult = await accessControlService.resolveAccessMethod({
+            rfidUid: cardUid,
+            type: location
+        });
+
+        const command = location === 'entry'
+            ? arduinoService.generateBarrierCommand(validationResult)
+            : arduinoService.generateExitCommand(validationResult);
+
+        // If entry is allowed, register it automatically
+        if (location === 'entry' && validationResult.allowed) {
+            const entry = await accessControlService.registerEntry(
+                validationResult.subscription?.vehicle_plate || validationResult.rfidCard?.metadata?.vehicle_plate || 'RFID-TEMP',
+                validationResult
+            );
+
+            // For RFID subscriptions, generate internal QR but don't print
+            let qrCode = null;
+            if (!validationResult.rfidCard || validationResult.accessType === 'hourly') {
+                const ticketId = entry.event?.id || entry.session?.id || Date.now().toString();
+                qrCode = await qrcodeService.generateEntryQR({
+                    ticketId,
+                    plate: validationResult.subscription?.vehicle_plate || 'RFID',
+                    accessType: validationResult.accessType,
+                    entryTime: new Date().toISOString(),
+                    planName: validationResult.subscription?.plan_name || validationResult.plan?.name,
+                    customerName: validationResult.subscription?.customer_name || null
+                });
+            }
+
+            // Emit socket event
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('vehicle_entry', {
+                    plate: validationResult.subscription?.vehicle_plate || 'RFID',
+                    type: validationResult.accessType,
+                    method: 'rfid',
+                    time: new Date().toISOString()
+                });
+            }
+
+            return res.json({
+                success: true,
+                command,
+                entry,
+                qrCode,
+                validationResult,
+                internalOnlyQr: validationResult.accessType === 'subscription'
+            });
+        }
+
+        // If exit is allowed and free, register automatically
+        if (location === 'exit' && validationResult.allowed && validationResult.payment?.is_free) {
+            await accessControlService.registerExit(
+                validationResult.session?.vehicle_plate || 'RFID',
+                validationResult
+            );
+
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('vehicle_exit', {
+                    plate: validationResult.session?.vehicle_plate || 'RFID',
+                    method: 'rfid',
+                    time: new Date().toISOString()
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            command,
+            validationResult
+        });
+
+    } catch (error) {
+        next(error);
+    }
+});
+
 module.exports = router;

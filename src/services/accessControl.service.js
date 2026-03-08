@@ -1,13 +1,73 @@
 const { query, transaction } = require('../config/database');
 const { isWithinInterval, getHours, getMinutes, addHours } = require('date-fns');
 const hourlyRateService = require('./hourlyRate.service');
+const rfidService = require('./rfid.service');
 
 /**
  * Servicio de Control de Acceso
  * Maneja tanto suscripciones como parqueo por hora
  */
 class AccessControlService {
-    
+
+    /**
+     * Resolver método de acceso (RFID > QR > Manual)
+     * Punto de entrada principal que determina qué método usar
+     */
+    async resolveAccessMethod({ rfidUid, qrData, vehiclePlate, type }) {
+        // Priority 1: RFID
+        if (rfidUid) {
+            const resolution = await rfidService.resolveCardForAccess(rfidUid);
+            if (!resolution.allowed && resolution.allowed !== undefined) {
+                return resolution; // Card disabled/lost/not found
+            }
+
+            const plate = resolution.subscription?.vehicle_plate || vehiclePlate;
+            if (!plate) {
+                return { allowed: false, reason: 'NO_PLATE', message: 'No se pudo determinar la placa del vehículo' };
+            }
+
+            let result;
+            if (type === 'entry') {
+                result = await this.validateEntry(plate);
+            } else {
+                result = await this.validateExit(plate);
+            }
+
+            // Attach RFID info to result
+            result.accessMethod = 'rfid';
+            result.rfidCard = resolution.card;
+            return result;
+        }
+
+        // Priority 2: QR
+        if (qrData) {
+            const plate = qrData.plate || vehiclePlate;
+            let result;
+            if (type === 'entry') {
+                result = await this.validateEntry(plate);
+            } else {
+                result = await this.validateExit(plate);
+            }
+            result.accessMethod = 'qr';
+            result.qrData = qrData;
+            return result;
+        }
+
+        // Priority 3: Manual (plate only)
+        if (vehiclePlate) {
+            let result;
+            if (type === 'entry') {
+                result = await this.validateEntry(vehiclePlate);
+            } else {
+                result = await this.validateExit(vehiclePlate);
+            }
+            result.accessMethod = 'manual';
+            return result;
+        }
+
+        return { allowed: false, reason: 'NO_IDENTIFICATION', message: 'Se requiere RFID, QR o placa del vehículo' };
+    }
+
     /**
      * Validar acceso de entrada
      * Determina si el vehículo puede entrar y bajo qué modalidad
@@ -264,37 +324,60 @@ class AccessControlService {
      * Registrar entrada
      */
     async registerEntry(vehiclePlate, validationResult, operatorId = null) {
+        const accessMethod = validationResult.accessMethod || (operatorId ? 'manual' : 'qr');
+        const rfidCard = validationResult.rfidCard || null;
+
         return await transaction(async (client) => {
             if (validationResult.accessType === 'subscription') {
+                // Build metadata
+                const metadata = {};
+                if (accessMethod === 'rfid') {
+                    metadata.internal_only_qr = true;
+                }
+
                 // Registrar evento de acceso
                 const eventResult = await client.query(
                     `INSERT INTO access_events (
                         subscription_id, vehicle_id, vehicle_plate,
-                        type, timestamp, validation_method,
-                        operator_id, was_valid
-                    ) VALUES ($1, $2, $3, 'entry', NOW(), $4, $5, true)
+                        type, timestamp, validation_method, access_method,
+                        rfid_card_id, operator_id, was_valid
+                    ) VALUES ($1, $2, $3, 'entry', NOW(), $4, $5, $6, $7, true)
                     RETURNING *`,
                     [
                         validationResult.subscription.id,
                         null, // vehicle_id se puede obtener del subscription si es necesario
                         vehiclePlate,
-                        operatorId ? 'manual' : 'qr',
+                        accessMethod,
+                        accessMethod,
+                        rfidCard?.id || null,
                         operatorId
                     ]
                 );
-                
-                return {
+
+                // If RFID permanent card, activate it
+                if (accessMethod === 'rfid' && rfidCard) {
+                    await rfidService.activateCard(rfidCard.id);
+                }
+
+                const result = {
                     type: 'subscription',
-                    event: eventResult.rows[0]
+                    event: eventResult.rows[0],
+                    metadata
                 };
-                
+
+                return result;
+
             } else if (validationResult.accessType === 'hourly') {
                 // Iniciar sesión de parqueo por hora
                 const session = await hourlyRateService.startParkingSession(
                     vehiclePlate,
-                    validationResult.plan.id
+                    validationResult.plan.id,
+                    {
+                        accessMethod: validationResult.accessMethod || 'qr',
+                        rfidCardId: validationResult.rfidCard?.id || null
+                    }
                 );
-                
+
                 return {
                     type: 'hourly',
                     session
@@ -307,47 +390,59 @@ class AccessControlService {
      * Registrar salida
      */
     async registerExit(vehiclePlate, validationResult, operatorId = null) {
+        const accessMethod = validationResult.accessMethod || (operatorId ? 'manual' : 'qr');
+        const rfidCard = validationResult.rfidCard || null;
+
         return await transaction(async (client) => {
             if (validationResult.accessType === 'subscription') {
                 // Registrar evento de salida
                 const eventResult = await client.query(
                     `INSERT INTO access_events (
                         subscription_id, vehicle_id, vehicle_plate,
-                        type, timestamp, validation_method,
-                        operator_id, was_valid, duration_minutes,
+                        type, timestamp, validation_method, access_method,
+                        rfid_card_id, operator_id, was_valid, duration_minutes,
                         additional_charges, charge_reason
-                    ) VALUES ($1, $2, $3, 'exit', NOW(), $4, $5, true, $6, $7, $8)
+                    ) VALUES ($1, $2, $3, 'exit', NOW(), $4, $5, $6, $7, true, $8, $9, $10)
                     RETURNING *`,
                     [
                         validationResult.entry.subscription_id,
                         null,
                         vehiclePlate,
-                        operatorId ? 'manual' : 'qr',
+                        accessMethod,
+                        accessMethod,
+                        rfidCard?.id || null,
                         operatorId,
                         validationResult.exit.duration_minutes,
                         validationResult.exit.additional_charges,
                         validationResult.exit.charge_reason
                     ]
                 );
-                
+
                 return {
                     type: 'subscription',
                     event: eventResult.rows[0],
                     additionalCharges: validationResult.exit.additional_charges
                 };
-                
+
             } else if (validationResult.accessType === 'hourly') {
                 // Finalizar sesión
                 const result = await hourlyRateService.endParkingSession(
                     validationResult.session.id,
                     validationResult.session.exit_time
                 );
-                
-                return {
+
+                const exitResult = {
                     type: 'hourly',
                     session: result.session,
                     calculation: result.calculation
                 };
+
+                // If RFID temporary card, flag for return after payment
+                if (accessMethod === 'rfid' && rfidCard) {
+                    exitResult.rfidPendingReturn = true;
+                }
+
+                return exitResult;
             }
         });
     }
