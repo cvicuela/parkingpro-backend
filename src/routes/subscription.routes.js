@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const { query } = require('../config/database');
+const { query, supabase } = require('../config/database');
 
 /**
  * @route   GET /api/v1/subscriptions
@@ -52,6 +52,64 @@ router.post('/', authenticate, async (req, res, next) => {
         
         res.status(201).json({
             success: true,
+            data: result.rows[0]
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/subscriptions/:id/cancel
+ * @desc    Cancelar suscripción con motivo opcional
+ * @access  Private (Admin)
+ */
+router.post('/:id/cancel', authenticate, async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        // Verify subscription exists
+        const existing = await query(
+            'SELECT * FROM subscriptions WHERE id = $1',
+            [id]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Suscripción no encontrada'
+            });
+        }
+
+        if (existing.rows[0].status === 'cancelled') {
+            return res.status(400).json({
+                success: false,
+                error: 'La suscripción ya está cancelada'
+            });
+        }
+
+        // Call the Supabase RPC cancel_subscription with p_reason parameter
+        const token = process.env.SUPABASE_SERVICE_KEY;
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_subscription', {
+            p_token: token,
+            p_id: id,
+            p_reason: reason || null
+        });
+
+        if (rpcError) {
+            throw new Error(`Error al cancelar suscripción: ${rpcError.message}`);
+        }
+
+        // Re-fetch the updated subscription
+        const result = await query(
+            'SELECT * FROM subscriptions WHERE id = $1',
+            [id]
+        );
+
+        res.json({
+            success: true,
+            message: 'Suscripción cancelada',
             data: result.rows[0]
         });
     } catch (error) {
