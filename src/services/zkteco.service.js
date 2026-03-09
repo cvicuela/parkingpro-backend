@@ -280,6 +280,10 @@ class ZKTecoService {
                 cmd.writeUInt16LE(0x06, 0);  // CMD_LOCK
                 cmd.writeUInt8(command.relay || 1, 2);
                 break;
+            case 'read_card':
+                cmd.writeUInt16LE(0x0A, 0);  // CMD_READ_CARD
+                cmd.writeUInt8(command.timeout || 30, 2);
+                break;
             case 'reboot':
                 cmd.writeUInt16LE(0x0B, 0);  // CMD_RESTART
                 break;
