@@ -8,7 +8,7 @@ const { query } = require('../config/database');
  * @desc    Listar vehículos
  * @access  Private
  */
-router.get('/', authenticate, async (req, res, next) => {
+router.get('/', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const result = await query(
             `SELECT v.*, c.first_name || ' ' || c.last_name as customer_name
@@ -31,7 +31,7 @@ router.get('/', authenticate, async (req, res, next) => {
  * @desc    Crear vehículo
  * @access  Private
  */
-router.post('/', authenticate, async (req, res, next) => {
+router.post('/', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { customerId, plate, make, model, color, year } = req.body;
         

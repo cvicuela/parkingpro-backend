@@ -37,7 +37,7 @@ router.get('/', authenticate, authorize(['operator', 'admin', 'super_admin']), a
  * @desc    Obtener cliente por ID
  * @access  Private
  */
-router.get('/:id', authenticate, async (req, res, next) => {
+router.get('/:id', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { id } = req.params;
         
@@ -133,7 +133,7 @@ router.post('/', authenticate, authorize(['admin', 'super_admin']), async (req, 
  * @desc    Actualizar cliente
  * @access  Private
  */
-router.patch('/:id', authenticate, async (req, res, next) => {
+router.patch('/:id', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { id } = req.params;
         const updates = req.body;

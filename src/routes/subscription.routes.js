@@ -8,7 +8,7 @@ const { query, supabase } = require('../config/database');
  * @desc    Listar suscripciones
  * @access  Private
  */
-router.get('/', authenticate, async (req, res, next) => {
+router.get('/', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { search, status } = req.query;
         let sql = `SELECT
@@ -60,7 +60,7 @@ router.get('/', authenticate, async (req, res, next) => {
  * @desc    Crear suscripción
  * @access  Private
  */
-router.post('/', authenticate, async (req, res, next) => {
+router.post('/', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { customerId, vehicleId, planId, pricePerPeriod } = req.body;
         
@@ -87,7 +87,7 @@ router.post('/', authenticate, async (req, res, next) => {
  * @desc    Cancelar suscripción con motivo opcional
  * @access  Private (Admin)
  */
-router.post('/:id/cancel', authenticate, async (req, res, next) => {
+router.post('/:id/cancel', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { id } = req.params;
         const { reason } = req.body;

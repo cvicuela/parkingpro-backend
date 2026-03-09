@@ -20,7 +20,20 @@ router.post('/register', async (req, res, next) => {
                 error: 'Email, teléfono y contraseña son requeridos'
             });
         }
-        
+
+        // Password complexity check
+        if (password.length < 8) {
+            return res.status(400).json({
+                error: 'La contraseña debe tener al menos 8 caracteres'
+            });
+        }
+
+        if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+            return res.status(400).json({
+                error: 'La contraseña debe contener al menos una mayúscula, una minúscula y un número'
+            });
+        }
+
         // Hash password
         const passwordHash = await bcrypt.hash(password, 10);
         

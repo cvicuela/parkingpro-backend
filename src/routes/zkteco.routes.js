@@ -11,7 +11,12 @@ const { authenticate } = require('../middleware/auth');
  */
 const authenticateDevice = (req, res, next) => {
     const apiKey = req.headers['x-zkteco-key'] || req.headers['x-device-key'];
-    const expectedKey = process.env.ZKTECO_API_KEY || 'parkingpro-zkteco-2024';
+    const expectedKey = process.env.ZKTECO_API_KEY;
+
+    if (!expectedKey) {
+        console.error('[ZKTeco] ZKTECO_API_KEY environment variable is not set');
+        return res.status(500).json({ error: 'Server configuration error' });
+    }
 
     if (!apiKey || apiKey !== expectedKey) {
         return res.status(401).json({ error: 'API key de dispositivo invalida' });
