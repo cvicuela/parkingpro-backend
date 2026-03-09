@@ -11,7 +11,12 @@ const hourlyRateService = require('../services/hourlyRate.service');
  */
 const authenticateArduino = (req, res, next) => {
     const apiKey = req.headers['x-arduino-key'];
-    const expectedKey = process.env.ARDUINO_API_KEY || 'parkingpro-arduino-2024';
+    const expectedKey = process.env.ARDUINO_API_KEY;
+
+    if (!expectedKey) {
+        console.error('[Arduino] ARDUINO_API_KEY environment variable is not set');
+        return res.status(500).json({ error: 'Server configuration error' });
+    }
 
     if (!apiKey || apiKey !== expectedKey) {
         return res.status(401).json({

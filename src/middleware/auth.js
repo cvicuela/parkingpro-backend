@@ -11,6 +11,16 @@ async function authenticate(req, res, next) {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
+        // Validate session is still active
+        const sessionResult = await query(
+            'SELECT 1 FROM sessions WHERE token = $1 AND expires_at > NOW()',
+            [token]
+        );
+
+        if (sessionResult.rows.length === 0) {
+            return res.status(401).json({ error: 'Sesión expirada o inválida' });
+        }
+
         const result = await query(
             'SELECT * FROM users WHERE id = $1 AND status = $2',
             [decoded.userId, 'active']

@@ -48,6 +48,15 @@ function auditMiddleware(entityType) {
                 const entityId = body?.data?.id || req.params?.id || null;
                 const action = `${req.method.toLowerCase()}_${entityType}`;
 
+                // Sanitize request body before logging - strip sensitive fields
+                const sanitizedBody = req.body ? { ...req.body } : null;
+                if (sanitizedBody) {
+                    delete sanitizedBody.password;
+                    delete sanitizedBody.newPassword;
+                    delete sanitizedBody.currentPassword;
+                    delete sanitizedBody.token;
+                }
+
                 logAudit({
                     userId: req.user.id,
                     action,
@@ -56,7 +65,7 @@ function auditMiddleware(entityType) {
                     changes: {
                         method: req.method,
                         path: req.path,
-                        body: req.body,
+                        body: sanitizedBody,
                         result: body?.data || null
                     },
                     req
