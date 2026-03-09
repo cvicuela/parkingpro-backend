@@ -155,7 +155,126 @@ router.post('/devices/:serial/close', authenticate, async (req, res, next) => {
     }
 });
 
+// ─── RFID Reader Commands ─────────────────────────────────
+
+/**
+ * @route   POST /api/v1/zkteco/devices/:serial/read-card
+ * @desc    Solicitar lectura de tarjeta RFID desde un lector conectado.
+ *          Pone el lector en modo escucha y notifica via Socket.IO
+ */
+router.post('/devices/:serial/read-card', authenticate, async (req, res, next) => {
+    try {
+        const device = zktecoService.getDevice(req.params.serial);
+        if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+        if (device.type !== 'reader' && device.type !== 'controller') {
+            return res.status(400).json({ error: 'Este dispositivo no es un lector RFID' });
+        }
+
+        device.reading_mode = true;
+        device.reading_requested_at = new Date();
+        device.reading_requested_by = req.user?.id || null;
+
+        let tcpResult = null;
+        if (device.ip_address) {
+            try {
+                tcpResult = await zktecoService.sendTCPCommand(req.params.serial, {
+                    action: 'read_card',
+                    timeout: 30
+                });
+            } catch (err) {
+                console.log(`[ZKTeco] TCP read-card failed for ${req.params.serial}: ${err.message}`);
+            }
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to('dashboard').emit('reader_listening', {
+                serial_number: req.params.serial,
+                device_name: device.name,
+                location: device.location
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `Lector ${device.name} en modo escucha`,
+            tcp_sent: !!tcpResult,
+            device: { serial_number: device.serial_number, name: device.name, location: device.location }
+        });
+    } catch (error) { next(error); }
+});
+
+/**
+ * @route   POST /api/v1/zkteco/devices/:serial/stop-reading
+ * @desc    Detener modo lectura
+ */
+router.post('/devices/:serial/stop-reading', authenticate, (req, res) => {
+    const device = zktecoService.getDevice(req.params.serial);
+    if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+    device.reading_mode = false;
+    device.reading_requested_at = null;
+    const io = req.app.get('io');
+    if (io) io.to('dashboard').emit('reader_stopped', { serial_number: req.params.serial });
+    res.json({ success: true, message: 'Modo lectura detenido' });
+});
+
+/**
+ * @route   GET /api/v1/zkteco/readers
+ * @desc    Listar lectores RFID disponibles (readers + controllers)
+ */
+router.get('/readers', authenticate, (req, res) => {
+    const readers = zktecoService.getDevices({ type: 'reader' });
+    const controllers = zktecoService.getDevices({ type: 'controller' });
+    const all = [...readers, ...controllers].map(d => ({
+        serial_number: d.serial_number,
+        name: d.name,
+        model: d.model,
+        location: d.location,
+        status: d.status,
+        reading_mode: d.reading_mode || false,
+        config: { wiegand_format: d.config?.wiegand_format || 26, read_mode: d.config?.read_mode || 'rfid' }
+    }));
+    res.json({ success: true, data: all });
+});
+
 // ─── Device PUSH Endpoints (llamados por los dispositivos) ──
+
+/**
+ * @route   POST /api/v1/zkteco/push/card-read
+ * @desc    Lector RFID reporta tarjeta escaneada (modo registro/asignacion)
+ */
+router.post('/push/card-read', authenticateDevice, (req, res) => {
+    const { serial_number, card_uid, format } = req.body;
+
+    if (!card_uid) {
+        return res.status(400).json({ error: 'card_uid es requerido' });
+    }
+
+    const device = zktecoService.getDevice(serial_number);
+    if (device) {
+        device.last_seen = new Date();
+        device.last_event = { type: 'card_read', card_uid, timestamp: new Date() };
+        // Desactivar modo lectura despues de leer
+        device.reading_mode = false;
+        device.reading_requested_at = null;
+    }
+
+    zktecoService._logEvent(serial_number, 'card_read', { card_uid, format });
+
+    // Emitir a dashboard via Socket.IO para que el modal de registro capture el UID
+    const io = req.app.get('io');
+    if (io) {
+        io.to('dashboard').emit('card_scanned', {
+            serial_number,
+            card_uid: card_uid.toUpperCase().replace(/[:\- ]/g, ''),
+            format: format || 'hex',
+            device_name: device?.name || serial_number,
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    res.json({ success: true, message: 'Tarjeta recibida' });
+});
 
 /**
  * @route   POST /api/v1/zkteco/push/heartbeat
