@@ -27,6 +27,9 @@ const auditRoutes = require('./routes/audit.routes');
 const rfidRoutes = require('./routes/rfid.routes');
 const userRoutes = require('./routes/user.routes');
 const zktecoRoutes = require('./routes/zkteco.routes');
+const expenseRoutes = require('./routes/expense.routes');
+const incidentRoutes = require('./routes/incident.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -149,6 +152,9 @@ app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/rfid', rfidRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/zkteco', zktecoRoutes);
+app.use('/api/v1/expenses', expenseRoutes);
+app.use('/api/v1/incidents', incidentRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // ==================== SPA FALLBACK ====================
 
