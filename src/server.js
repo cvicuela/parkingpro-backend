@@ -34,6 +34,12 @@ const notificationRoutes = require('./routes/notification.routes');
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
 
+// Validate critical environment variables at startup
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+    console.error('FATAL: JWT_SECRET must be set and at least 32 characters long');
+    process.exit(1);
+}
+
 // Inicializar app
 const app = express();
 const server = http.createServer(app);
@@ -56,7 +62,16 @@ app.set('io', io);
 io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Authentication required'));
-    next();
+
+    // Verify JWT signature and expiry
+    try {
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.userId;
+        next();
+    } catch (err) {
+        return next(new Error('Invalid or expired token'));
+    }
 });
 
 io.on('connection', (socket) => {
@@ -75,8 +90,23 @@ io.on('connection', (socket) => {
 
 // Seguridad
 app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", process.env.FRONTEND_URL || 'http://localhost:5173'],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            frameAncestors: ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false,
+    hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+    },
 }));
 
 // CORS

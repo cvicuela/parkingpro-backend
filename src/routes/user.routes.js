@@ -313,9 +313,15 @@ router.put('/:id/reset-password', async (req, res, next) => {
             });
         }
 
-        if (newPassword.length < 6) {
+        if (newPassword.length < 8) {
             return res.status(400).json({
-                error: 'La contraseña debe tener al menos 6 caracteres'
+                error: 'La contraseña debe tener al menos 8 caracteres'
+            });
+        }
+
+        if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+            return res.status(400).json({
+                error: 'La contraseña debe contener al menos una mayúscula, una minúscula y un número'
             });
         }
 

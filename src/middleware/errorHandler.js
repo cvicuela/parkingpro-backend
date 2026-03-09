@@ -18,14 +18,22 @@ function errorHandler(err, req, res, next) {
     error.message = err.message;
     error.stack = err.stack;
     
-    // Log del error
+    // Log del error (sanitize sensitive fields)
+    const sanitizedBody = req.body ? { ...req.body } : undefined;
+    if (sanitizedBody) {
+        const sensitiveFields = ['password', 'newPassword', 'token', 'secret', 'creditCard', 'cardNumber'];
+        for (const field of sensitiveFields) {
+            if (sanitizedBody[field]) sanitizedBody[field] = '[REDACTED]';
+        }
+    }
+
     if (process.env.NODE_ENV === 'development') {
         console.error('❌ Error:', {
             message: error.message,
             stack: error.stack,
             url: req.originalUrl,
             method: req.method,
-            body: req.body
+            body: sanitizedBody
         });
     } else {
         console.error('❌ Error:', error.message);
@@ -114,10 +122,9 @@ function errorHandler(err, req, res, next) {
         code: error.code || 'INTERNAL_ERROR'
     };
     
-    // En desarrollo, incluir stack trace
+    // En desarrollo, incluir stack trace (never expose in production)
     if (process.env.NODE_ENV === 'development') {
         response.stack = error.stack;
-        response.details = error;
     }
     
     res.status(statusCode).json(response);
