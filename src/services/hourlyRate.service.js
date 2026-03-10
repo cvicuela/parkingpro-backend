@@ -208,10 +208,11 @@ class HourlyRateService {
      */
     async getActiveSessions() {
         const result = await query(
-            `SELECT 
-                ps.*,
+            `SELECT
+                ps.id, ps.vehicle_plate, ps.plan_id, ps.customer_id,
+                ps.entry_time, ps.status, ps.assigned_spot,
                 p.name as plan_name,
-                c.first_name || ' ' || c.last_name as customer_name,
+                COALESCE(c.first_name || ' ' || c.last_name, 'Visitante') as customer_name,
                 EXTRACT(EPOCH FROM (NOW() - ps.entry_time))/60 as minutes_elapsed
              FROM parking_sessions ps
              JOIN plans p ON ps.plan_id = p.id

@@ -47,7 +47,7 @@ function getDateRange(period, customFrom, customTo) {
  * @desc    KPIs principales del dashboard
  * @access  Private (Admin)
  */
-router.get('/dashboard', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+router.get('/dashboard', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const revenueResult = await query(
             `SELECT COALESCE(SUM(total_amount), 0) as total_revenue
@@ -78,13 +78,21 @@ router.get('/dashboard', authenticate, authorize(['admin', 'super_admin']), asyn
              WHERE status = 'past_due'`
         );
 
+        const revenue = parseFloat(revenueResult.rows[0].total_revenue);
+        const activeCustomers = parseInt(customersResult.rows[0].active_customers);
+        const totalSubscriptions = parseInt(subscriptionsResult.rows[0].total_subscriptions);
+        const overdueCount = parseInt(overdueResult.rows[0].overdue_count);
+
         res.json({
             success: true,
             data: {
-                revenue: parseFloat(revenueResult.rows[0].total_revenue),
-                activeCustomers: parseInt(customersResult.rows[0].active_customers),
-                totalSubscriptions: parseInt(subscriptionsResult.rows[0].total_subscriptions),
-                overdueCount: parseInt(overdueResult.rows[0].overdue_count),
+                revenue,
+                activeCustomers,
+                active_customers: activeCustomers,
+                totalSubscriptions,
+                total_subscriptions: totalSubscriptions,
+                overdueCount,
+                overdue_count: overdueCount,
                 occupancyByPlan: occupancyResult.rows
             }
         });
