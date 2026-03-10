@@ -479,8 +479,11 @@ CREATE TABLE cash_registers (
     opened_by UUID REFERENCES users(id) ON DELETE SET NULL,
     closed_at TIMESTAMP,
     expected_balance DECIMAL(10,2),
+    expected_cash DECIMAL(10,2),
     counted_balance DECIMAL(10,2),
     difference DECIMAL(10,2),
+    total_card DECIMAL(10,2) DEFAULT 0,
+    total_transfer DECIMAL(10,2) DEFAULT 0,
     requires_approval BOOLEAN DEFAULT FALSE,
     approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMP,
@@ -505,6 +508,7 @@ CREATE TABLE cash_register_transactions (
     parking_session_id UUID REFERENCES parking_sessions(id) ON DELETE SET NULL,
     operator_id UUID REFERENCES users(id) ON DELETE SET NULL,
     description TEXT,
+    payment_method VARCHAR(20) DEFAULT 'cash',
     metadata JSONB,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -512,6 +516,7 @@ CREATE TABLE cash_register_transactions (
 CREATE INDEX idx_cash_txn_register ON cash_register_transactions(cash_register_id);
 CREATE INDEX idx_cash_txn_type ON cash_register_transactions(type);
 CREATE INDEX idx_cash_txn_payment ON cash_register_transactions(payment_id);
+CREATE INDEX idx_cash_txn_payment_method ON cash_register_transactions(payment_method);
 
 CREATE TABLE denomination_counts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

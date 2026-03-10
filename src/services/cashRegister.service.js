@@ -18,36 +18,44 @@ class CashRegisterService {
 
     // ─── APERTURA DE CAJA ────────────────────────────────────────────────────
 
-    async openRegister({ operatorId, openingBalance, name, req }) {
-        // Verificar que el operador no tenga caja abierta
+    async openRegister({ operatorId, openingBalance, name, targetOperatorId, req }) {
+        // Si un admin abre caja para otro operador, usar targetOperatorId
+        const effectiveOperatorId = targetOperatorId || operatorId;
+
+        // Verificar si el operador objetivo ya tiene caja abierta
         const existing = await query(
             `SELECT id FROM cash_registers WHERE operator_id = $1 AND status = 'open'`,
-            [operatorId]
+            [effectiveOperatorId]
         );
         if (existing.rows.length > 0) {
+            // Si ya tiene sesión abierta, retornar la existente en vez de error
+            const activeRegister = await this.getActiveRegister(effectiveOperatorId);
+            if (activeRegister) {
+                return { ...activeRegister, already_open: true };
+            }
             throw new Error('Ya tienes una caja abierta. Ciérrala antes de abrir otra.');
         }
 
         return await transaction(async (client) => {
             const result = await client.query(
                 `INSERT INTO cash_registers (name, operator_id, status, opened_at, opening_balance, opened_by)
-                 VALUES ($1, $2, 'open', NOW(), $3, $2)
+                 VALUES ($1, $2, 'open', NOW(), $3, $4)
                  RETURNING *`,
-                [name || 'Caja Principal', operatorId, openingBalance || 0]
+                [name || 'Caja Principal', effectiveOperatorId, openingBalance || 0, operatorId]
             );
             const register = result.rows[0];
 
             // Registrar el fondo inicial como transacción
             if (openingBalance > 0) {
                 await client.query(
-                    `INSERT INTO cash_register_transactions (cash_register_id, type, amount, direction, operator_id, description)
-                     VALUES ($1, 'opening_float', $2, 'in', $3, 'Fondo inicial de caja')`,
-                    [register.id, openingBalance, operatorId]
+                    `INSERT INTO cash_register_transactions (cash_register_id, type, amount, direction, operator_id, description, payment_method)
+                     VALUES ($1, 'opening_float', $2, 'in', $3, 'Fondo inicial de caja', 'cash')`,
+                    [register.id, openingBalance, effectiveOperatorId]
                 );
             }
 
             await logAudit({
-                userId: operatorId,
+                userId: effectiveOperatorId,
                 action: 'cash_register_opened',
                 entityType: 'cash_register',
                 entityId: register.id,
@@ -61,7 +69,7 @@ class CashRegisterService {
 
     // ─── REGISTRAR COBRO EN CAJA ─────────────────────────────────────────────
 
-    async recordPayment({ registerId, paymentId, amount, sessionId, operatorId, description, req }) {
+    async recordPayment({ registerId, paymentId, amount, sessionId, operatorId, description, paymentMethod, req }) {
         const registerCheck = await query(
             `SELECT id, status FROM cash_registers WHERE id = $1 AND operator_id = $2`,
             [registerId, operatorId]
@@ -73,12 +81,15 @@ class CashRegisterService {
             throw new Error('La caja está cerrada. Ábrela antes de registrar cobros.');
         }
 
+        // Normalizar método de pago: cardnet/stripe → card para simplificar
+        const method = (paymentMethod === 'cardnet' || paymentMethod === 'stripe') ? 'card' : (paymentMethod || 'cash');
+
         const result = await query(
             `INSERT INTO cash_register_transactions
-             (cash_register_id, type, amount, direction, payment_id, parking_session_id, operator_id, description)
-             VALUES ($1, 'payment', $2, 'in', $3, $4, $5, $6)
+             (cash_register_id, type, amount, direction, payment_id, parking_session_id, operator_id, description, payment_method)
+             VALUES ($1, 'payment', $2, 'in', $3, $4, $5, $6, $7)
              RETURNING *`,
-            [registerId, amount, paymentId || null, sessionId || null, operatorId, description || 'Cobro de estacionamiento']
+            [registerId, amount, paymentId || null, sessionId || null, operatorId, description || 'Cobro de estacionamiento', method]
         );
 
         return result.rows[0];
@@ -126,18 +137,29 @@ class CashRegisterService {
             throw new Error('Caja abierta no encontrada para este operador');
         }
 
-        // Calcular saldo esperado: fondo inicial + ingresos - egresos
+        // Calcular totales desglosados por método de pago
         const totalsResult = await query(
             `SELECT
                 COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) as total_in,
-                COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0) as total_out
+                COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0) as total_out,
+                COALESCE(SUM(CASE WHEN direction = 'in' AND (payment_method = 'cash' OR payment_method IS NULL) THEN amount ELSE 0 END), 0) as cash_in,
+                COALESCE(SUM(CASE WHEN direction = 'out' AND (payment_method = 'cash' OR payment_method IS NULL) THEN amount ELSE 0 END), 0) as cash_out,
+                COALESCE(SUM(CASE WHEN direction = 'in' AND payment_method = 'card' THEN amount ELSE 0 END), 0) as card_in,
+                COALESCE(SUM(CASE WHEN direction = 'in' AND payment_method = 'transfer' THEN amount ELSE 0 END), 0) as transfer_in
              FROM cash_register_transactions
              WHERE cash_register_id = $1`,
             [registerId]
         );
-        const { total_in, total_out } = totalsResult.rows[0];
-        const expectedBalance = parseFloat(total_in) - parseFloat(total_out);
-        const difference = parseFloat(countedBalance) - expectedBalance;
+        const totals = totalsResult.rows[0];
+        // Saldo esperado total (todos los métodos)
+        const expectedBalance = parseFloat(totals.total_in) - parseFloat(totals.total_out);
+        // Saldo esperado SOLO EFECTIVO (lo que debería estar en la caja física)
+        const expectedCash = parseFloat(totals.cash_in) - parseFloat(totals.cash_out);
+        const totalCard = parseFloat(totals.card_in);
+        const totalTransfer = parseFloat(totals.transfer_in);
+
+        // La diferencia se calcula contra el efectivo esperado, no el total
+        const difference = parseFloat(countedBalance) - expectedCash;
         const threshold = parseFloat(await getSetting('cash_diff_threshold', '200'));
         const requiresApproval = Math.abs(difference) > threshold;
 
@@ -160,14 +182,17 @@ class CashRegisterService {
                     status = 'closed',
                     closed_at = NOW(),
                     expected_balance = $1,
-                    counted_balance = $2,
-                    difference = $3,
-                    requires_approval = $4,
-                    notes = $5,
+                    expected_cash = $2,
+                    counted_balance = $3,
+                    difference = $4,
+                    total_card = $5,
+                    total_transfer = $6,
+                    requires_approval = $7,
+                    notes = $8,
                     updated_at = NOW()
-                 WHERE id = $6
+                 WHERE id = $9
                  RETURNING *`,
-                [expectedBalance, countedBalance, difference, requiresApproval, notes || null, registerId]
+                [expectedBalance, expectedCash, countedBalance, difference, totalCard, totalTransfer, requiresApproval, notes || null, registerId]
             );
 
             const closed = result.rows[0];
@@ -177,13 +202,13 @@ class CashRegisterService {
                 action: 'cash_register_closed',
                 entityType: 'cash_register',
                 entityId: registerId,
-                changes: { expectedBalance, countedBalance, difference, requiresApproval },
+                changes: { expectedBalance, expectedCash, countedBalance, difference, totalCard, totalTransfer, requiresApproval },
                 req
             });
 
             // Enviar alerta por email si hay diferencia mayor al umbral
             if (requiresApproval) {
-                await this._sendDifferenceAlert({ register: closed, operatorId, difference, expectedBalance, countedBalance });
+                await this._sendDifferenceAlert({ register: closed, operatorId, difference, expectedCash: expectedCash, countedBalance });
             }
 
             return { ...closed, requiresApproval, message: requiresApproval
@@ -228,6 +253,10 @@ class CashRegisterService {
             `SELECT cr.*,
                 COALESCE(SUM(CASE WHEN crt.direction = 'in' THEN crt.amount ELSE 0 END), 0) as total_in,
                 COALESCE(SUM(CASE WHEN crt.direction = 'out' THEN crt.amount ELSE 0 END), 0) as total_out,
+                COALESCE(SUM(CASE WHEN crt.direction = 'in' AND (crt.payment_method = 'cash' OR crt.payment_method IS NULL) THEN crt.amount ELSE 0 END), 0) as cash_in,
+                COALESCE(SUM(CASE WHEN crt.direction = 'out' AND (crt.payment_method = 'cash' OR crt.payment_method IS NULL) THEN crt.amount ELSE 0 END), 0) as cash_out,
+                COALESCE(SUM(CASE WHEN crt.direction = 'in' AND crt.payment_method = 'card' THEN crt.amount ELSE 0 END), 0) as total_card,
+                COALESCE(SUM(CASE WHEN crt.direction = 'in' AND crt.payment_method = 'transfer' THEN crt.amount ELSE 0 END), 0) as total_transfer,
                 COUNT(CASE WHEN crt.type = 'payment' THEN 1 END) as payment_count
              FROM cash_registers cr
              LEFT JOIN cash_register_transactions crt ON crt.cash_register_id = cr.id
@@ -284,7 +313,7 @@ class CashRegisterService {
 
     // ─── ALERTA POR EMAIL ─────────────────────────────────────────────────────
 
-    async _sendDifferenceAlert({ register, operatorId, difference, expectedBalance, countedBalance }) {
+    async _sendDifferenceAlert({ register, operatorId, difference, expectedCash, countedBalance }) {
         try {
             const smtpHost = process.env.SMTP_HOST;
             const smtpUser = process.env.SMTP_USER;
@@ -312,8 +341,8 @@ class CashRegisterService {
                     <p><strong>Tipo:</strong> ${tipo}</p>
                     <p><strong>Caja:</strong> ${register.name}</p>
                     <p><strong>Cierre:</strong> ${new Date().toLocaleString('es-DO')}</p>
-                    <p><strong>Saldo esperado:</strong> RD$${parseFloat(expectedBalance).toFixed(2)}</p>
-                    <p><strong>Saldo contado:</strong> RD$${parseFloat(countedBalance).toFixed(2)}</p>
+                    <p><strong>Efectivo esperado:</strong> RD$${parseFloat(expectedCash).toFixed(2)}</p>
+                    <p><strong>Efectivo contado:</strong> RD$${parseFloat(countedBalance).toFixed(2)}</p>
                     <p><strong>Diferencia:</strong> RD$${difference.toFixed(2)}</p>
                     <p><em>Esta caja requiere aprobación del supervisor antes de ser archivada.</em></p>
                 `

@@ -236,17 +236,26 @@ router.post('/sessions/:id/end', authenticate, authorize(['operator', 'admin', '
 router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { paymentId, amount } = req.body;
-        
+        const { paymentId, amount, paymentMethod } = req.body;
+
         const session = await hourlyRateService.recordSessionPayment(id, paymentId, amount);
-// After line: const session = await hourlyRateService.recordSessionPayment(id, paymentId, amount);
-// Add cash register integration
 
         // Registrar cobro en la caja abierta del operador (si existe)
         try {
             const cashRegisterService = require('../services/cashRegister.service');
             const activeRegister = await cashRegisterService.getActiveRegister(req.user.id);
             if (activeRegister) {
+                // Determinar método de pago: del body, o buscar en la tabla payments
+                let method = paymentMethod || 'cash';
+                if (!paymentMethod && paymentId) {
+                    try {
+                        const { query: dbQuery } = require('../config/database');
+                        const paymentRes = await dbQuery('SELECT payment_method FROM payments WHERE id = $1', [paymentId]);
+                        if (paymentRes.rows.length > 0) {
+                            method = paymentRes.rows[0].payment_method || 'cash';
+                        }
+                    } catch {}
+                }
                 await cashRegisterService.recordPayment({
                     registerId: activeRegister.id,
                     paymentId: paymentId || null,
@@ -254,6 +263,7 @@ router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin
                     sessionId: id,
                     operatorId: req.user.id,
                     description: `Cobro sesión estacionamiento`,
+                    paymentMethod: method,
                     req
                 });
             }
