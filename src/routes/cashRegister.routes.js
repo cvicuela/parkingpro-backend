@@ -9,14 +9,19 @@ const { query: dbQuery } = require('../config/database');
 // ── APERTURA DE CAJA ─────────────────────────────────────────────────────────
 router.post('/open', authenticate, authorize(['operator', 'admin', 'super_admin']), auditMiddleware('cash_register'), async (req, res, next) => {
     try {
-        const { openingBalance, name } = req.body;
+        const { openingBalance, name, operatorId: targetOperatorId } = req.body;
+        // Si el usuario es admin/super_admin puede abrir caja para otro operador
+        const canAssign = ['admin', 'super_admin'].includes(req.user.role) && targetOperatorId;
         const register = await cashRegisterService.openRegister({
             operatorId: req.user.id,
+            targetOperatorId: canAssign ? targetOperatorId : null,
             openingBalance: parseFloat(openingBalance) || 0,
             name,
             req
         });
-        res.status(201).json({ success: true, data: register });
+        // Si la caja ya estaba abierta, retornar 200 en vez de 201
+        const status = register.already_open ? 200 : 201;
+        res.status(status).json({ success: true, data: register, already_open: !!register.already_open });
     } catch (error) {
         next(error);
     }
