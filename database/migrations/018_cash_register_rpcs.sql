@@ -23,7 +23,11 @@ BEGIN
   SELECT r.user_id, r.user_role INTO v_user_id, v_role
   FROM require_role(p_token, ARRAY['operator','admin','super_admin']) r;
 
-  v_opening_balance := COALESCE((p_data->>'openingBalance')::DECIMAL, 0);
+  v_opening_balance := COALESCE(
+    (p_data->>'openingBalance')::DECIMAL,
+    (p_data->>'opening_balance')::DECIMAL,
+    0
+  );
   v_name := COALESCE(p_data->>'name', 'Caja Principal');
 
   -- Si es admin y envía operatorId, abrir para ese operador
@@ -389,6 +393,170 @@ BEGIN
       'currency', COALESCE(v_currency, 'DOP')
     )
   );
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', SQLERRM);
+END;
+$function$;
+
+-- ============================================================
+-- process_parking_payment: Procesar pago de estacionamiento
+-- Integra: payment, parking_session, invoice, cash_register
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.process_parking_payment(p_token TEXT, p_data JSON)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $function$
+DECLARE
+  v_user_id UUID;
+  v_role VARCHAR;
+  v_session RECORD;
+  v_payment_method VARCHAR(20);
+  v_amount DECIMAL(10,2);
+  v_tax_rate DECIMAL(5,4);
+  v_tax_amount DECIMAL(10,2);
+  v_total_amount DECIMAL(10,2);
+  v_payment_id UUID;
+  v_register_id UUID;
+  v_invoice_id UUID;
+  v_invoice_number VARCHAR(50);
+  v_ncf VARCHAR(30);
+  v_receipt JSON;
+  v_verification_code VARCHAR(10);
+  v_method_normalized VARCHAR(20);
+BEGIN
+  SELECT r.user_id, r.user_role INTO v_user_id, v_role
+  FROM require_role(p_token, ARRAY['operator','admin','super_admin']) r;
+
+  -- Obtener sesión
+  SELECT ps.*, p.name as plan_name
+  INTO v_session
+  FROM parking_sessions ps
+  LEFT JOIN plans p ON ps.plan_id = p.id
+  WHERE ps.id = (p_data->>'sessionId')::UUID;
+
+  IF v_session IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Sesión no encontrada');
+  END IF;
+
+  IF v_session.payment_status = 'paid' THEN
+    RETURN json_build_object('success', false, 'error', 'Esta sesión ya fue pagada');
+  END IF;
+
+  v_payment_method := COALESCE(p_data->>'paymentMethod', 'cash');
+  v_amount := v_session.calculated_amount;
+  v_tax_rate := 0.18;
+  v_tax_amount := ROUND(v_amount * v_tax_rate, 2);
+  v_total_amount := v_amount + v_tax_amount;
+  v_verification_code := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
+
+  -- Normalizar método para cash_register (cardnet/stripe -> card)
+  IF v_payment_method IN ('cardnet', 'stripe') THEN
+    v_method_normalized := 'card';
+  ELSE
+    v_method_normalized := v_payment_method;
+  END IF;
+
+  -- 1. Crear pago
+  INSERT INTO payments (
+    amount, tax_amount, total_amount, currency, status,
+    payment_method, paid_at, metadata
+  ) VALUES (
+    v_amount, v_tax_amount, v_total_amount, 'DOP', 'paid',
+    v_payment_method, NOW(),
+    json_build_object(
+      'sessionId', v_session.id,
+      'plate', v_session.vehicle_plate,
+      'cashReceived', (p_data->>'cashReceived')::DECIMAL,
+      'cashChange', (p_data->>'cashChange')::DECIMAL,
+      'cardType', p_data->>'cardType',
+      'transferReference', p_data->>'transferReference',
+      'verification_code', v_verification_code
+    )::jsonb
+  )
+  RETURNING id INTO v_payment_id;
+
+  -- 2. Actualizar sesión
+  UPDATE parking_sessions SET
+    payment_id = v_payment_id,
+    paid_amount = v_total_amount,
+    payment_status = 'paid',
+    status = 'paid',
+    exit_time = COALESCE(exit_time, NOW()),
+    updated_at = NOW()
+  WHERE id = v_session.id;
+
+  -- 3. Generar factura
+  SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_number FROM '[0-9]+$') AS INT)), 0) + 1
+  INTO v_invoice_id FROM invoices;
+  v_invoice_number := 'PP-' || TO_CHAR(NOW(), 'YYYY') || '-' || LPAD(v_invoice_id::TEXT, 4, '0');
+
+  -- Obtener NCF si hay secuencia disponible
+  BEGIN
+    SELECT prefix || LPAD(current_number::TEXT, 8, '0') INTO v_ncf
+    FROM ncf_sequences
+    WHERE ncf_type = '02' AND status = 'active' AND current_number <= end_number
+    LIMIT 1;
+
+    IF v_ncf IS NOT NULL THEN
+      UPDATE ncf_sequences SET current_number = current_number + 1
+      WHERE ncf_type = '02' AND status = 'active' AND current_number <= end_number;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_ncf := NULL;
+  END;
+
+  INSERT INTO invoices (payment_id, invoice_number, ncf, subtotal, tax_amount, total, status, issued_at)
+  VALUES (v_payment_id, v_invoice_number, v_ncf, v_amount, v_tax_amount, v_total_amount, 'issued', NOW());
+
+  -- 4. Registrar en caja activa del operador
+  SELECT id INTO v_register_id FROM cash_registers
+  WHERE operator_id = v_user_id AND status = 'open'
+  LIMIT 1;
+
+  IF v_register_id IS NOT NULL THEN
+    INSERT INTO cash_register_transactions (
+      cash_register_id, type, amount, direction,
+      payment_id, parking_session_id, operator_id,
+      description, payment_method
+    ) VALUES (
+      v_register_id, 'payment', v_total_amount, 'in',
+      v_payment_id, v_session.id, v_user_id,
+      'Cobro estacionamiento ' || v_session.vehicle_plate,
+      v_method_normalized
+    );
+  END IF;
+
+  -- 5. Audit log
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
+  VALUES (v_user_id, 'payment_created', 'payment', v_payment_id,
+    json_build_object(
+      'amount', v_total_amount,
+      'method', v_payment_method,
+      'plate', v_session.vehicle_plate,
+      'session_id', v_session.id,
+      'register_id', v_register_id
+    )::jsonb);
+
+  -- 6. Construir recibo
+  v_receipt := json_build_object(
+    'plateNumber', v_session.vehicle_plate,
+    'invoiceNumber', v_invoice_number,
+    'ncf', v_ncf,
+    'subtotal', v_amount,
+    'tax', v_tax_amount,
+    'total', v_total_amount,
+    'paymentMethod', v_payment_method,
+    'entryTime', v_session.entry_time,
+    'exitTime', COALESCE(v_session.exit_time, NOW()),
+    'hours', CEIL(EXTRACT(EPOCH FROM (COALESCE(v_session.exit_time, NOW()) - v_session.entry_time)) / 3600),
+    'code', 'REC-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 100000)::TEXT, 5, '0'),
+    'verification_code', v_verification_code,
+    'paymentId', v_payment_id
+  );
+
+  RETURN json_build_object('success', true, 'data', json_build_object('receipt', v_receipt));
 EXCEPTION
   WHEN OTHERS THEN
     RETURN json_build_object('success', false, 'error', SQLERRM);
