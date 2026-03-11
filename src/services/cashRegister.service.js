@@ -1,18 +1,6 @@
 const { query, transaction } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
-const nodemailer = require('nodemailer');
-
-// Helper: leer setting de la DB con fallback
-async function getSetting(key, fallback) {
-    try {
-        const result = await query(`SELECT value FROM settings WHERE key = $1`, [key]);
-        if (result.rows.length > 0) {
-            const v = result.rows[0].value;
-            return typeof v === 'string' ? v : JSON.stringify(v);
-        }
-    } catch {}
-    return fallback;
-}
+const emailService = require('./email.service');
 
 class CashRegisterService {
 
@@ -315,38 +303,37 @@ class CashRegisterService {
 
     async _sendDifferenceAlert({ register, operatorId, difference, expectedCash, countedBalance }) {
         try {
-            const smtpHost = process.env.SMTP_HOST;
-            const smtpUser = process.env.SMTP_USER;
-            const smtpPass = process.env.SMTP_PASS;
+            // Get operator name
+            let operatorName = 'Operador';
+            try {
+                const opRes = await query(
+                    `SELECT COALESCE(c.first_name || ' ' || c.last_name, u.email) AS name
+                     FROM users u LEFT JOIN customers c ON c.user_id = u.id WHERE u.id = $1`,
+                    [operatorId]
+                );
+                if (opRes.rows[0]) operatorName = opRes.rows[0].name;
+            } catch {}
 
-            if (!smtpHost || !smtpUser) {
-                console.warn('[CashRegister] SMTP no configurado, alerta no enviada');
-                return;
+            const result = await emailService.sendTemplateEmail({
+                to: 'all',
+                templateId: 'cash_alert',
+                templateData: {
+                    registerName: register.name,
+                    operatorName,
+                    closedAt: new Date().toLocaleString('es-DO'),
+                    openingBalance: register.opening_balance || 0,
+                    expectedBalance: expectedCash,
+                    countedBalance,
+                    difference,
+                    requiresApproval: true,
+                },
+            });
+
+            if (result.success) {
+                console.log(`[CashRegister] Alerta enviada a: ${result.sentTo.join(', ')}`);
+            } else {
+                console.warn('[CashRegister] No se pudo enviar alerta:', result.error);
             }
-
-            const transporter = nodemailer.createTransport({
-                host: smtpHost,
-                port: parseInt(process.env.SMTP_PORT) || 587,
-                secure: false,
-                auth: { user: smtpUser, pass: smtpPass }
-            });
-
-            const tipo = difference < 0 ? 'FALTANTE' : 'SOBRANTE';
-            await transporter.sendMail({
-                from: smtpUser,
-                to: await getSetting('alert_email', 'alonsoveloz@gmail.com'),
-                subject: `[ParkingPro] Alerta de Caja: ${tipo} de RD$${Math.abs(difference).toFixed(2)}`,
-                html: `
-                    <h2>Alerta de Cuadre de Caja</h2>
-                    <p><strong>Tipo:</strong> ${tipo}</p>
-                    <p><strong>Caja:</strong> ${register.name}</p>
-                    <p><strong>Cierre:</strong> ${new Date().toLocaleString('es-DO')}</p>
-                    <p><strong>Efectivo esperado:</strong> RD$${parseFloat(expectedCash).toFixed(2)}</p>
-                    <p><strong>Efectivo contado:</strong> RD$${parseFloat(countedBalance).toFixed(2)}</p>
-                    <p><strong>Diferencia:</strong> RD$${difference.toFixed(2)}</p>
-                    <p><em>Esta caja requiere aprobación del supervisor antes de ser archivada.</em></p>
-                `
-            });
         } catch (err) {
             console.error('[CashRegister] Error enviando alerta:', err.message);
         }
