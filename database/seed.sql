@@ -3,9 +3,12 @@
 -- ============================================
 
 -- Limpiar datos existentes (en orden inverso por dependencias)
-TRUNCATE TABLE 
+TRUNCATE TABLE
     notifications,
     audit_logs,
+    denomination_counts,
+    cash_register_transactions,
+    cash_registers,
     settings,
     incidents,
     parking_sessions,
@@ -409,45 +412,45 @@ INSERT INTO parking_sessions (
 -- ============================================
 
 INSERT INTO settings (key, value, description, category) VALUES
-('billing.grace_period_hours', '72', 'Horas de gracia antes de suspender suscripción', 'billing'),
-('billing.retry_attempts', '3', 'Número de reintentos automáticos de pago', 'billing'),
-('billing.retry_interval_hours', '24', 'Horas entre reintentos', 'billing'),
-('billing.late_fee', '200', 'Cargo por mora en DOP', 'billing'),
-('billing.tax_rate', '0.18', 'ITBIS (18%)', 'billing'),
+('billing.grace_period_hours', '"72"', 'Horas de gracia antes de suspender suscripción', 'billing'),
+('billing.retry_attempts', '"3"', 'Número de reintentos automáticos de pago', 'billing'),
+('billing.retry_interval_hours', '"24"', 'Horas entre reintentos', 'billing'),
+('billing.late_fee', '"200"', 'Cargo por mora en DOP', 'billing'),
+('billing.tax_rate', '"0.18"', 'ITBIS (18%)', 'billing'),
 
-('capacity.total_spaces', '170', 'Espacios totales del parqueo', 'capacity'),
-('capacity.floating_reserve', '20', 'Espacios de reserva flotante', 'capacity'),
+('capacity.total_spaces', '"170"', 'Espacios totales del parqueo', 'capacity'),
+('capacity.floating_reserve', '"20"', 'Espacios de reserva flotante', 'capacity'),
 
-('limits.daily_entries', '5', 'Entradas permitidas por día (planes regulares)', 'limits'),
-('limits.vehicles_per_customer', '1', 'Vehículos incluidos en plan base', 'limits'),
+('limits.daily_entries', '"5"', 'Entradas permitidas por día (planes regulares)', 'limits'),
+('limits.vehicles_per_customer', '"1"', 'Vehículos incluidos en plan base', 'limits'),
 
-('charges.overage_hour', '100', 'Cargo por hora fuera de horario', 'charges'),
-('charges.additional_vehicle_monthly', '500', 'Costo mensual por vehículo adicional', 'charges'),
-('charges.replacement_qr', '150', 'Costo de reemplazo de QR/tarjeta', 'charges'),
+('charges.overage_hour', '"100"', 'Cargo por hora fuera de horario', 'charges'),
+('charges.additional_vehicle_monthly', '"500"', 'Costo mensual por vehículo adicional', 'charges'),
+('charges.replacement_qr', '"150"', 'Costo de reemplazo de QR/tarjeta', 'charges'),
 
-('hourly.first_hour_rate', '50', 'Tarifa primera hora', 'hourly'),
-('hourly.second_hour_rate', '70', 'Tarifa segunda hora', 'hourly'),
-('hourly.additional_hour_rate', '100', 'Tarifa hora 3 en adelante', 'hourly'),
-('hourly.tolerance_minutes', '5', 'Minutos de tolerancia gratis', 'hourly'),
+('hourly.first_hour_rate', '"50"', 'Tarifa primera hora', 'hourly'),
+('hourly.second_hour_rate', '"70"', 'Tarifa segunda hora', 'hourly'),
+('hourly.additional_hour_rate', '"100"', 'Tarifa hora 3 en adelante', 'hourly'),
+('hourly.tolerance_minutes', '"5"', 'Minutos de tolerancia gratis', 'hourly'),
 
-('notifications.whatsapp_enabled', 'true', 'Habilitar notificaciones WhatsApp', 'notifications'),
-('notifications.email_enabled', 'true', 'Habilitar notificaciones Email', 'notifications'),
-('notifications.sms_enabled', 'false', 'Habilitar notificaciones SMS', 'notifications'),
+('notifications.whatsapp_enabled', '"true"', 'Habilitar notificaciones WhatsApp', 'notifications'),
+('notifications.email_enabled', '"true"', 'Habilitar notificaciones Email', 'notifications'),
+('notifications.sms_enabled', '"false"', 'Habilitar notificaciones SMS', 'notifications'),
 
-('cash.diff_threshold', '200', 'Umbral diferencia de caja para aprobación supervisor (RD$)', 'cash'),
-('cash.refund_limit_operator', '500', 'Monto máximo reembolso operador sin aprobación (RD$)', 'cash'),
-('cash.refund_daily_multiplier', '3', 'Multiplicador límite diario reembolsos', 'cash'),
-('cash.multi_register_enabled', 'false', 'Permitir múltiples cajas simultáneas', 'cash'),
-('cash.alert_email', 'alonsoveloz@gmail.com', 'Email para alertas de caja', 'cash'),
-('invoice.ncf_series_consumer', 'B01', 'Serie NCF consumidor final (provisional)', 'invoice'),
-('invoice.ncf_series_fiscal', 'B14', 'Serie NCF valor fiscal (provisional)', 'invoice'),
-('invoice.ncf_series_credit', 'B04', 'Serie NCF notas de crédito (provisional)', 'invoice'),
-('invoice.business_name', 'ParkingPro', 'Nombre del negocio en facturas', 'invoice'),
-('invoice.business_rnc', '', 'RNC del negocio (completar en producción)', 'invoice'),
+('cash.diff_threshold', '"200"', 'Umbral diferencia de caja para aprobación supervisor (RD$)', 'cash'),
+('cash.refund_limit_operator', '"500"', 'Monto máximo reembolso operador sin aprobación (RD$)', 'cash'),
+('cash.refund_daily_multiplier', '"3"', 'Multiplicador límite diario reembolsos', 'cash'),
+('cash.multi_register_enabled', '"false"', 'Permitir múltiples cajas simultáneas', 'cash'),
+('cash.alert_email', '"alonsoveloz@gmail.com"', 'Email para alertas de caja', 'cash'),
+('invoice.ncf_series_consumer', '"B01"', 'Serie NCF consumidor final (provisional)', 'invoice'),
+('invoice.ncf_series_fiscal', '"B14"', 'Serie NCF valor fiscal (provisional)', 'invoice'),
+('invoice.ncf_series_credit', '"B04"', 'Serie NCF notas de crédito (provisional)', 'invoice'),
+('invoice.business_name', '"ParkingPro"', 'Nombre del negocio en facturas', 'invoice'),
+('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice'),
 
-('terminal_sequence_start', '1', 'Numero inicial del rango de comprobantes del terminal', 'facturacion'),
-('terminal_sequence_end', '999999', 'Numero final del rango de comprobantes del terminal', 'facturacion'),
-('terminal_sequence_current', '1', 'Proximo numero de comprobante a emitir', 'facturacion');
+('terminal_sequence_start', '"1"', 'Numero inicial del rango de comprobantes del terminal', 'facturacion'),
+('terminal_sequence_end', '"999999"', 'Numero final del rango de comprobantes del terminal', 'facturacion'),
+('terminal_sequence_current', '"1"', 'Proximo numero de comprobante a emitir', 'facturacion');
 
 -- ============================================
 -- ACTUALIZAR OCUPACIÓN DE PLANES
