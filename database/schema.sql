@@ -671,7 +671,7 @@ SELECT
     s.next_billing_date,
     s.price_per_period,
     s.activated_at,
-    EXTRACT(DAY FROM (s.next_billing_date - CURRENT_DATE)) AS days_until_renewal
+    (s.next_billing_date - CURRENT_DATE) AS days_until_renewal
 FROM subscriptions s
 JOIN customers c ON s.customer_id = c.id
 JOIN users u ON c.user_id = u.id

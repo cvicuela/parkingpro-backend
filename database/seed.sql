@@ -9,6 +9,8 @@ TRUNCATE TABLE
     denomination_counts,
     cash_register_transactions,
     cash_registers,
+    expenses,
+    ncf_sequences,
     settings,
     incidents,
     parking_sessions,
