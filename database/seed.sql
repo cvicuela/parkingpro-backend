@@ -377,12 +377,12 @@ INSERT INTO access_events (
 -- Ejemplo: Vehículo en parqueo por hora (activo)
 INSERT INTO parking_sessions (
     vehicle_plate, plan_id, entry_time,
-    is_active, assigned_spot
+    status, assigned_spot
 ) VALUES (
     'X999888', -- Vehículo sin suscripción, usando parqueo por hora
     '00000000-0000-0000-0000-000000000404',
     NOW() - INTERVAL '1 hour 30 minutes',
-    true,
+    'active',
     'H-15'
 );
 
@@ -390,7 +390,7 @@ INSERT INTO parking_sessions (
 INSERT INTO parking_sessions (
     vehicle_plate, plan_id, entry_time, exit_time,
     duration_minutes, calculated_amount, paid_amount,
-    payment_status, is_active, assigned_spot
+    payment_status, status, assigned_spot
 ) VALUES (
     'Y777666',
     '00000000-0000-0000-0000-000000000404',
@@ -400,7 +400,7 @@ INSERT INTO parking_sessions (
     220.00, -- 50 + 70 + 100
     220.00,
     'paid',
-    false,
+    'paid',
     'H-08'
 );
 
