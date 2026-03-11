@@ -12,19 +12,19 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm"; -- Para búsqueda full-text
 -- ============================================
 -- TIPOS ENUMERADOS
 -- ============================================
-CREATE TYPE user_role AS ENUM ('customer', 'operator', 'admin', 'super_admin');
-CREATE TYPE subscription_status AS ENUM ('pending', 'active', 'past_due', 'cancelled', 'suspended');
-CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded', 'chargeback');
-CREATE TYPE access_event_type AS ENUM ('entry', 'exit');
-CREATE TYPE plan_type AS ENUM ('diurno', 'nocturno', '24h', 'hourly');
-CREATE TYPE billing_frequency AS ENUM ('monthly', 'weekly', 'hourly');
-CREATE TYPE session_status AS ENUM ('active', 'paid', 'closed', 'abandoned');
+DO $$ BEGIN CREATE TYPE user_role AS ENUM ('customer', 'operator', 'admin', 'super_admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE subscription_status AS ENUM ('pending', 'active', 'past_due', 'cancelled', 'suspended'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded', 'chargeback'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE access_event_type AS ENUM ('entry', 'exit'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE plan_type AS ENUM ('diurno', 'nocturno', '24h', 'hourly'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE billing_frequency AS ENUM ('monthly', 'weekly', 'hourly'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE session_status AS ENUM ('active', 'paid', 'closed', 'abandoned'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================
 -- TABLAS DE USUARIOS Y AUTENTICACIÓN
 -- ============================================
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     phone VARCHAR(20) UNIQUE NOT NULL,
@@ -41,12 +41,12 @@ CREATE TABLE users (
     CONSTRAINT phone_format CHECK (phone ~* '^\+?[1-9]\d{1,14}$')
 );
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_phone ON users(phone);
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_status ON users(status);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 
-CREATE TABLE otp_codes (
+CREATE TABLE IF NOT EXISTS otp_codes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     code VARCHAR(6) NOT NULL,
@@ -62,11 +62,11 @@ CREATE TABLE otp_codes (
     CONSTRAINT max_attempts CHECK (attempts <= 5)
 );
 
-CREATE INDEX idx_otp_user_id ON otp_codes(user_id);
-CREATE INDEX idx_otp_code_phone ON otp_codes(code, phone);
-CREATE INDEX idx_otp_expires_at ON otp_codes(expires_at);
+CREATE INDEX IF NOT EXISTS idx_otp_user_id ON otp_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_otp_code_phone ON otp_codes(code, phone);
+CREATE INDEX IF NOT EXISTS idx_otp_expires_at ON otp_codes(expires_at);
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     token VARCHAR(500) UNIQUE NOT NULL,
@@ -78,15 +78,15 @@ CREATE TABLE sessions (
     last_activity_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_token ON sessions(token);
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 
 -- ============================================
 -- TABLAS DE CLIENTES Y VEHÍCULOS
 -- ============================================
 
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     first_name VARCHAR(100) NOT NULL,
@@ -101,13 +101,13 @@ CREATE TABLE customers (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_customers_user_id ON customers(user_id);
-CREATE INDEX idx_customers_id_document ON customers(id_document);
-CREATE INDEX idx_customers_rnc ON customers(rnc);
-CREATE INDEX idx_customers_fulltext ON customers USING gin(to_tsvector('spanish', 
+CREATE INDEX IF NOT EXISTS idx_customers_user_id ON customers(user_id);
+CREATE INDEX IF NOT EXISTS idx_customers_id_document ON customers(id_document);
+CREATE INDEX IF NOT EXISTS idx_customers_rnc ON customers(rnc);
+CREATE INDEX IF NOT EXISTS idx_customers_fulltext ON customers USING gin(to_tsvector('spanish', 
     first_name || ' ' || last_name || ' ' || COALESCE(company_name, '')));
 
-CREATE TABLE vehicles (
+CREATE TABLE IF NOT EXISTS vehicles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
     plate VARCHAR(20) UNIQUE NOT NULL,
@@ -124,14 +124,14 @@ CREATE TABLE vehicles (
     CONSTRAINT valid_year CHECK (year >= 1900 AND year <= EXTRACT(YEAR FROM NOW()) + 1)
 );
 
-CREATE INDEX idx_vehicles_customer_id ON vehicles(customer_id);
-CREATE INDEX idx_vehicles_plate ON vehicles(plate);
+CREATE INDEX IF NOT EXISTS idx_vehicles_customer_id ON vehicles(customer_id);
+CREATE INDEX IF NOT EXISTS idx_vehicles_plate ON vehicles(plate);
 
 -- ============================================
 -- TABLAS DE PLANES Y TARIFAS
 -- ============================================
 
-CREATE TABLE plans (
+CREATE TABLE IF NOT EXISTS plans (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(50) UNIQUE NOT NULL,
     type plan_type NOT NULL,
@@ -172,11 +172,11 @@ CREATE TABLE plans (
     CONSTRAINT valid_occupancy CHECK (current_occupancy >= 0 AND current_occupancy <= max_capacity)
 );
 
-CREATE INDEX idx_plans_type ON plans(type);
-CREATE INDEX idx_plans_is_active ON plans(is_active);
+CREATE INDEX IF NOT EXISTS idx_plans_type ON plans(type);
+CREATE INDEX IF NOT EXISTS idx_plans_is_active ON plans(is_active);
 
 -- NUEVA TABLA: Tarifas por hora configurables
-CREATE TABLE hourly_rates (
+CREATE TABLE IF NOT EXISTS hourly_rates (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     plan_id UUID REFERENCES plans(id) ON DELETE CASCADE,
     hour_number INT NOT NULL, -- 1 = primera hora, 2 = segunda, etc.
@@ -191,14 +191,14 @@ CREATE TABLE hourly_rates (
     UNIQUE(plan_id, hour_number)
 );
 
-CREATE INDEX idx_hourly_rates_plan_id ON hourly_rates(plan_id);
-CREATE INDEX idx_hourly_rates_hour_number ON hourly_rates(hour_number);
+CREATE INDEX IF NOT EXISTS idx_hourly_rates_plan_id ON hourly_rates(plan_id);
+CREATE INDEX IF NOT EXISTS idx_hourly_rates_hour_number ON hourly_rates(hour_number);
 
 -- ============================================
 -- TABLAS DE SUSCRIPCIONES
 -- ============================================
 
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
     vehicle_id UUID REFERENCES vehicles(id) ON DELETE SET NULL,
@@ -238,19 +238,19 @@ CREATE TABLE subscriptions (
     CONSTRAINT positive_price CHECK (price_per_period >= 0)
 );
 
-CREATE INDEX idx_subscriptions_customer_id ON subscriptions(customer_id);
-CREATE INDEX idx_subscriptions_vehicle_id ON subscriptions(vehicle_id);
-CREATE INDEX idx_subscriptions_plan_id ON subscriptions(plan_id);
-CREATE INDEX idx_subscriptions_status ON subscriptions(status);
-CREATE INDEX idx_subscriptions_stripe_id ON subscriptions(stripe_subscription_id);
-CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date);
-CREATE INDEX idx_subscriptions_qr_code ON subscriptions(qr_code);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_customer_id ON subscriptions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_vehicle_id ON subscriptions(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id ON subscriptions(plan_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_id ON subscriptions(stripe_subscription_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_billing ON subscriptions(next_billing_date);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_qr_code ON subscriptions(qr_code);
 
 -- ============================================
 -- TABLAS DE PAGOS Y FACTURACIÓN
 -- ============================================
 
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
@@ -294,13 +294,13 @@ CREATE TABLE payments (
     )
 );
 
-CREATE INDEX idx_payments_subscription_id ON payments(subscription_id);
-CREATE INDEX idx_payments_customer_id ON payments(customer_id);
-CREATE INDEX idx_payments_status ON payments(status);
-CREATE INDEX idx_payments_stripe_intent ON payments(stripe_payment_intent_id);
-CREATE INDEX idx_payments_created_at ON payments(created_at);
+CREATE INDEX IF NOT EXISTS idx_payments_subscription_id ON payments(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_payments_customer_id ON payments(customer_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_stripe_intent ON payments(stripe_payment_intent_id);
+CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
 
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     payment_id UUID REFERENCES payments(id) ON DELETE CASCADE,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
@@ -328,16 +328,16 @@ CREATE TABLE invoices (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_invoices_payment_id ON invoices(payment_id);
-CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
-CREATE INDEX idx_invoices_number ON invoices(invoice_number);
-CREATE INDEX idx_invoices_created_at ON invoices(created_at);
+CREATE INDEX IF NOT EXISTS idx_invoices_payment_id ON invoices(payment_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at);
 
 -- ============================================
 -- TABLAS DE CONTROL DE ACCESO
 -- ============================================
 
-CREATE TABLE access_events (
+CREATE TABLE IF NOT EXISTS access_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL,
     vehicle_id UUID REFERENCES vehicles(id) ON DELETE SET NULL,
@@ -374,15 +374,15 @@ CREATE TABLE access_events (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_access_events_subscription_id ON access_events(subscription_id);
-CREATE INDEX idx_access_events_vehicle_id ON access_events(vehicle_id);
-CREATE INDEX idx_access_events_plate ON access_events(vehicle_plate);
-CREATE INDEX idx_access_events_type ON access_events(type);
-CREATE INDEX idx_access_events_timestamp ON access_events(timestamp);
-CREATE INDEX idx_access_events_operator_id ON access_events(operator_id);
+CREATE INDEX IF NOT EXISTS idx_access_events_subscription_id ON access_events(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_access_events_vehicle_id ON access_events(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_access_events_plate ON access_events(vehicle_plate);
+CREATE INDEX IF NOT EXISTS idx_access_events_type ON access_events(type);
+CREATE INDEX IF NOT EXISTS idx_access_events_timestamp ON access_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_access_events_operator_id ON access_events(operator_id);
 
 -- NUEVA TABLA: Sesiones de parqueo por hora
-CREATE TABLE parking_sessions (
+CREATE TABLE IF NOT EXISTS parking_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     vehicle_plate VARCHAR(20) NOT NULL,
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
@@ -411,12 +411,12 @@ CREATE TABLE parking_sessions (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_parking_sessions_plate ON parking_sessions(vehicle_plate);
-CREATE INDEX idx_parking_sessions_customer_id ON parking_sessions(customer_id);
-CREATE INDEX idx_parking_sessions_status ON parking_sessions(status);
-CREATE INDEX idx_parking_sessions_entry_time ON parking_sessions(entry_time);
+CREATE INDEX IF NOT EXISTS idx_parking_sessions_plate ON parking_sessions(vehicle_plate);
+CREATE INDEX IF NOT EXISTS idx_parking_sessions_customer_id ON parking_sessions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_parking_sessions_status ON parking_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_parking_sessions_entry_time ON parking_sessions(entry_time);
 
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     type VARCHAR(50) NOT NULL,
     vehicle_plate VARCHAR(20),
@@ -443,17 +443,17 @@ CREATE TABLE incidents (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_incidents_type ON incidents(type);
-CREATE INDEX idx_incidents_plate ON incidents(vehicle_plate);
-CREATE INDEX idx_incidents_subscription_id ON incidents(subscription_id);
-CREATE INDEX idx_incidents_status ON incidents(status);
-CREATE INDEX idx_incidents_created_at ON incidents(created_at);
+CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(type);
+CREATE INDEX IF NOT EXISTS idx_incidents_plate ON incidents(vehicle_plate);
+CREATE INDEX IF NOT EXISTS idx_incidents_subscription_id ON incidents(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents(created_at);
 
 -- ============================================
 -- TABLAS DE CONFIGURACIÓN Y SISTEMA
 -- ============================================
 
-CREATE TABLE settings (
+CREATE TABLE IF NOT EXISTS settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     key VARCHAR(100) UNIQUE NOT NULL,
     value JSONB NOT NULL,
@@ -463,13 +463,13 @@ CREATE TABLE settings (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_settings_key ON settings(key);
-CREATE INDEX idx_settings_category ON settings(category);
+CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
+CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 -- ============================================
 -- TABLAS DE CUADRE DE CAJA
 -- ============================================
 
-CREATE TABLE cash_registers (
+CREATE TABLE IF NOT EXISTS cash_registers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL DEFAULT 'Caja Principal',
     operator_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -494,11 +494,11 @@ CREATE TABLE cash_registers (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_cash_registers_operator ON cash_registers(operator_id);
-CREATE INDEX idx_cash_registers_status ON cash_registers(status);
-CREATE INDEX idx_cash_registers_opened_at ON cash_registers(opened_at);
+CREATE INDEX IF NOT EXISTS idx_cash_registers_operator ON cash_registers(operator_id);
+CREATE INDEX IF NOT EXISTS idx_cash_registers_status ON cash_registers(status);
+CREATE INDEX IF NOT EXISTS idx_cash_registers_opened_at ON cash_registers(opened_at);
 
-CREATE TABLE cash_register_transactions (
+CREATE TABLE IF NOT EXISTS cash_register_transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     cash_register_id UUID NOT NULL REFERENCES cash_registers(id) ON DELETE CASCADE,
     type VARCHAR(30) NOT NULL CHECK (type IN ('payment','refund','opening_float','manual_in','manual_out','adjustment')),
@@ -513,12 +513,12 @@ CREATE TABLE cash_register_transactions (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_cash_txn_register ON cash_register_transactions(cash_register_id);
-CREATE INDEX idx_cash_txn_type ON cash_register_transactions(type);
-CREATE INDEX idx_cash_txn_payment ON cash_register_transactions(payment_id);
-CREATE INDEX idx_cash_txn_payment_method ON cash_register_transactions(payment_method);
+CREATE INDEX IF NOT EXISTS idx_cash_txn_register ON cash_register_transactions(cash_register_id);
+CREATE INDEX IF NOT EXISTS idx_cash_txn_type ON cash_register_transactions(type);
+CREATE INDEX IF NOT EXISTS idx_cash_txn_payment ON cash_register_transactions(payment_id);
+CREATE INDEX IF NOT EXISTS idx_cash_txn_payment_method ON cash_register_transactions(payment_method);
 
-CREATE TABLE denomination_counts (
+CREATE TABLE IF NOT EXISTS denomination_counts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     cash_register_id UUID NOT NULL REFERENCES cash_registers(id) ON DELETE CASCADE,
     denomination DECIMAL(10,2) NOT NULL,
@@ -527,10 +527,10 @@ CREATE TABLE denomination_counts (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_denomination_register ON denomination_counts(cash_register_id);
+CREATE INDEX IF NOT EXISTS idx_denomination_register ON denomination_counts(cash_register_id);
 
 
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     action VARCHAR(100) NOT NULL,
@@ -548,12 +548,12 @@ CREATE TABLE audit_logs (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     
@@ -585,10 +585,10 @@ CREATE TABLE notifications (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_notifications_type ON notifications(type);
-CREATE INDEX idx_notifications_status ON notifications(status);
-CREATE INDEX idx_notifications_created_at ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
+CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
 
 -- ============================================
 -- FUNCIONES Y TRIGGERS
@@ -604,25 +604,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Aplicar a todas las tablas relevantes
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+CREATE OR REPLACE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_customers_updated_at BEFORE UPDATE ON customers
+CREATE OR REPLACE TRIGGER update_customers_updated_at BEFORE UPDATE ON customers
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_vehicles_updated_at BEFORE UPDATE ON vehicles
+CREATE OR REPLACE TRIGGER update_vehicles_updated_at BEFORE UPDATE ON vehicles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
+CREATE OR REPLACE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
+CREATE OR REPLACE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_incidents_updated_at BEFORE UPDATE ON incidents
+CREATE OR REPLACE TRIGGER update_incidents_updated_at BEFORE UPDATE ON incidents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_parking_sessions_updated_at BEFORE UPDATE ON parking_sessions
+CREATE OR REPLACE TRIGGER update_parking_sessions_updated_at BEFORE UPDATE ON parking_sessions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Actualizar ocupación de planes
@@ -646,7 +646,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_plan_occupancy_trigger
+CREATE OR REPLACE TRIGGER update_plan_occupancy_trigger
 AFTER INSERT OR UPDATE OR DELETE ON subscriptions
 FOR EACH ROW EXECUTE FUNCTION update_plan_occupancy();
 
@@ -655,7 +655,7 @@ FOR EACH ROW EXECUTE FUNCTION update_plan_occupancy();
 -- ============================================
 
 -- Suscripciones activas con detalles
-CREATE VIEW active_subscriptions_detail AS
+CREATE OR REPLACE VIEW active_subscriptions_detail AS
 SELECT 
     s.id,
     s.qr_code,
@@ -680,7 +680,7 @@ JOIN plans p ON s.plan_id = p.id
 WHERE s.status = 'active';
 
 -- Morosidad
-CREATE VIEW overdue_subscriptions AS
+CREATE OR REPLACE VIEW overdue_subscriptions AS
 SELECT 
     s.id AS subscription_id,
     c.first_name || ' ' || c.last_name AS customer_name,
@@ -702,7 +702,7 @@ WHERE s.status IN ('past_due', 'suspended')
 ORDER BY days_overdue DESC;
 
 -- Ocupación actual por plan
-CREATE VIEW current_occupancy_by_plan AS
+CREATE OR REPLACE VIEW current_occupancy_by_plan AS
 SELECT 
     p.id,
     p.name,
@@ -715,7 +715,7 @@ FROM plans p
 WHERE p.is_active = TRUE;
 
 -- Sesiones activas de parqueo por hora
-CREATE VIEW active_parking_sessions AS
+CREATE OR REPLACE VIEW active_parking_sessions AS
 SELECT 
     ps.id,
     ps.vehicle_plate,
