@@ -1152,17 +1152,16 @@ router.get('/export/:type', authenticate, authorize(['admin', 'super_admin']), a
                         ps.exit_time as salida,
                         ps.vehicle_plate as placa,
                         COALESCE(p.name, 'N/A') as plan,
-                        ps.duration_minutes as duracion_min,
+                        COALESCE(ps.duration_minutes, 0) as duracion_min,
                         COALESCE(ps.paid_amount, 0) as monto_pagado,
-                        ps.status as estado,
-                        COALESCE(ps.access_method::text, 'qr') as metodo_acceso
+                        ps.status as estado
                     FROM parking_sessions ps
                     LEFT JOIN plans p ON ps.plan_id = p.id
                     WHERE ps.entry_time >= $1 AND ps.entry_time <= $2
                     ORDER BY ps.entry_time DESC
                 `, [from, to]);
                 rows = result.rows;
-                headers = ['entrada', 'salida', 'placa', 'plan', 'duracion_min', 'monto_pagado', 'estado', 'metodo_acceso'];
+                headers = ['entrada', 'salida', 'placa', 'plan', 'duracion_min', 'monto_pagado', 'estado'];
                 filename = 'sesiones_parqueo';
                 break;
             }
@@ -1192,7 +1191,12 @@ router.get('/export/:type', authenticate, authorize(['admin', 'super_admin']), a
                 return res.status(400).json({ success: false, error: 'Tipo de reporte no valido' });
         }
 
-        // Generate CSV
+        // If format=json requested (for frontend Excel/CSV generation), return JSON
+        if (req.query.format === 'json') {
+            return res.json({ success: true, data: { headers, rows, filename } });
+        }
+
+        // Otherwise return raw CSV download
         const escapeCsv = (val) => {
             if (val === null || val === undefined) return '';
             const str = String(val);
