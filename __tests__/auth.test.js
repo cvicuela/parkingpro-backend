@@ -99,7 +99,7 @@ describe('Auth Routes', () => {
 
       const res = await request(app)
         .post('/api/v1/auth/login')
-        .send({ email: 'bad@test.com', password: 'wrong' });
+        .send({ email: 'bad@test.com', password: 'wrongpassword123' });
 
       expect(res.status).toBe(401);
     });
