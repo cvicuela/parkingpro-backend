@@ -16,6 +16,8 @@ jest.mock('../src/config/database', () => ({
 jest.mock('../src/middleware/auth', () => ({
   authenticate: (req, res, next) => {
     req.user = { id: 'test-user-id', role: 'admin', email: 'admin@test.com' };
+    req.headers = req.headers || {};
+    req.headers.authorization = req.headers.authorization || 'Bearer test-jwt-token';
     next();
   },
   authorize: () => (req, res, next) => next()
@@ -380,22 +382,22 @@ describe('Subscription Routes', () => {
       expect(res.body.data.status).toBe('cancelled');
     });
 
-    it('should cancel without a reason (null)', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [activeSubscription] });
-      mockSupabaseRpc.mockResolvedValueOnce({ data: true, error: null });
-      mockQuery.mockResolvedValueOnce({ rows: [cancelledSubscription] });
-
+    it('should return 400 when reason is missing', async () => {
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
         .send({});
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(mockSupabaseRpc).toHaveBeenCalledWith('cancel_subscription', {
-        p_token: 'test-service-key',
-        p_id: subId,
-        p_reason: null
-      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('motivo');
+      expect(mockSupabaseRpc).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 when reason is too short', async () => {
+      const res = await request(app)
+        .post(`/api/v1/subscriptions/${subId}/cancel`)
+        .send({ reason: 'ab' });
+
+      expect(res.status).toBe(400);
     });
 
     it('should pass the reason to supabase rpc', async () => {
@@ -403,29 +405,29 @@ describe('Subscription Routes', () => {
       mockSupabaseRpc.mockResolvedValueOnce({ data: true, error: null });
       mockQuery.mockResolvedValueOnce({ rows: [cancelledSubscription] });
 
-      const reason = 'No parking needed';
+      const reason = 'No parking needed anymore';
       await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
         .send({ reason });
 
       expect(mockSupabaseRpc).toHaveBeenCalledWith('cancel_subscription', {
-        p_token: 'test-service-key',
+        p_token: 'test-jwt-token',
         p_id: subId,
         p_reason: reason
       });
     });
 
-    it('should pass the SUPABASE_SERVICE_KEY as p_token', async () => {
+    it('should use user JWT token (not service key) as p_token', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [activeSubscription] });
       mockSupabaseRpc.mockResolvedValueOnce({ data: true, error: null });
       mockQuery.mockResolvedValueOnce({ rows: [cancelledSubscription] });
 
       await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test cancellation reason' });
 
       const rpcArgs = mockSupabaseRpc.mock.calls[0][1];
-      expect(rpcArgs.p_token).toBe('test-service-key');
+      expect(rpcArgs.p_token).toBe('test-jwt-token');
     });
 
     it('should return 404 if subscription not found', async () => {
@@ -433,7 +435,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post('/api/v1/subscriptions/nonexistent-id/cancel')
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);
@@ -446,7 +448,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -459,7 +461,7 @@ describe('Subscription Routes', () => {
 
       await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(mockSupabaseRpc).not.toHaveBeenCalled();
     });
@@ -469,7 +471,7 @@ describe('Subscription Routes', () => {
 
       await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(mockSupabaseRpc).not.toHaveBeenCalled();
     });
@@ -483,7 +485,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(res.status).toBe(500);
     });
@@ -493,7 +495,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Test reason for cancel' });
 
       expect(res.status).toBe(500);
     });
@@ -506,7 +508,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Pending no longer needed' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -520,7 +522,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Suspended too long' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -533,7 +535,7 @@ describe('Subscription Routes', () => {
 
       await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Need to re-fetch test' });
 
       // Should have called query twice: once for lookup, once for re-fetch
       expect(mockQuery).toHaveBeenCalledTimes(2);
@@ -549,7 +551,7 @@ describe('Subscription Routes', () => {
 
       const res = await request(app)
         .post(`/api/v1/subscriptions/${subId}/cancel`)
-        .send({});
+        .send({ reason: 'Re-fetch error test' });
 
       expect(res.status).toBe(500);
     });

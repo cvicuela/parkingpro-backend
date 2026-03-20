@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { isValidEmail, isValidDRPhone } = require('../middleware/validators');
 
 /**
  * @route   POST /api/v1/auth/register
@@ -21,11 +22,19 @@ router.post('/register', async (req, res, next) => {
             });
         }
 
+        // Validate formats
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ error: 'Formato de email inválido' });
+        }
+        if (!isValidDRPhone(phone)) {
+            return res.status(400).json({ error: 'Formato de teléfono inválido (ej: 809-555-1234)' });
+        }
+
         // Input length validation
-        if (email && email.length > 255) return res.status(400).json({ error: 'Email too long' });
-        if (password && password.length > 128) return res.status(400).json({ error: 'Password too long' });
-        if (password && password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-        if (phone && phone.length > 20) return res.status(400).json({ error: 'Phone number too long' });
+        if (email.length > 255) return res.status(400).json({ error: 'Email too long' });
+        if (password.length > 128) return res.status(400).json({ error: 'Password too long' });
+        if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        if (phone.length > 20) return res.status(400).json({ error: 'Phone number too long' });
 
         // Password complexity check
         if (password.length < 8) {
@@ -239,6 +248,69 @@ router.get('/me', authenticate, async (req, res, next) => {
             data: user
         });
         
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/auth/change-password
+ * @desc    Cambiar contraseña propia (requiere contraseña actual)
+ * @access  Private
+ */
+router.post('/change-password', authenticate, async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Contraseña actual y nueva son requeridas' });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres' });
+        }
+
+        if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+            return res.status(400).json({
+                error: 'La contraseña debe contener al menos una mayúscula, una minúscula y un número'
+            });
+        }
+
+        // Get current hash
+        const userResult = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Verify current password
+        const validCurrent = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
+        if (!validCurrent) {
+            return res.status(401).json({ error: 'Contraseña actual incorrecta' });
+        }
+
+        // Prevent reusing same password
+        const samePassword = await bcrypt.compare(newPassword, userResult.rows[0].password_hash);
+        if (samePassword) {
+            return res.status(400).json({ error: 'La nueva contraseña no puede ser igual a la actual' });
+        }
+
+        // Hash and update
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+        await query(
+            'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+            [passwordHash, req.user.id]
+        );
+
+        // Invalidate all OTHER sessions (keep current)
+        await query(
+            'DELETE FROM sessions WHERE user_id = $1 AND token != $2',
+            [req.user.id, req.token]
+        );
+
+        res.json({
+            success: true,
+            message: 'Contraseña actualizada exitosamente'
+        });
     } catch (error) {
         next(error);
     }

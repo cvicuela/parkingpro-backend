@@ -87,10 +87,17 @@ router.post('/', authenticate, authorize(['operator', 'admin', 'super_admin']), 
  * @desc    Cancelar suscripción con motivo opcional
  * @access  Private (Admin)
  */
-router.post('/:id/cancel', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+router.post('/:id/cancel', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
     try {
         const { id } = req.params;
         const { reason } = req.body;
+
+        if (!reason || reason.trim().length < 3) {
+            return res.status(400).json({
+                success: false,
+                error: 'Se requiere un motivo de cancelación (mínimo 3 caracteres)'
+            });
+        }
 
         // Verify subscription exists
         const existing = await query(
@@ -112,12 +119,12 @@ router.post('/:id/cancel', authenticate, authorize(['operator', 'admin', 'super_
             });
         }
 
-        // Call the Supabase RPC cancel_subscription with p_reason parameter
-        const token = process.env.SUPABASE_SERVICE_KEY;
+        // Use the authenticated user's token (not service key)
+        const token = req.headers.authorization?.split(' ')[1];
         const { data: rpcResult, error: rpcError } = await supabase.rpc('cancel_subscription', {
             p_token: token,
             p_id: id,
-            p_reason: reason || null
+            p_reason: reason.trim()
         });
 
         if (rpcError) {

@@ -59,9 +59,56 @@ router.get('/:id', authenticate, authorize(['operator', 'admin', 'super_admin'])
 router.post('/:id/refund', authenticate, authorize(['operator', 'admin', 'super_admin']), auditMiddleware('payment_refund'), async (req, res, next) => {
     try {
         const { reason } = req.body;
-        const refunded = await paymentService.refundPayment(req.params.id, {
+        const paymentId = req.params.id;
+
+        if (!reason || reason.trim().length < 3) {
+            return res.status(400).json({ error: 'Se requiere un motivo de reembolso (mínimo 3 caracteres)' });
+        }
+
+        // Verify payment exists and is refundable
+        const payment = await query('SELECT id, status, total_amount FROM payments WHERE id = $1', [paymentId]);
+        if (payment.rows.length === 0) {
+            return res.status(404).json({ error: 'Pago no encontrado' });
+        }
+        if (payment.rows[0].status === 'refunded') {
+            return res.status(409).json({ error: 'Este pago ya fue reembolsado' });
+        }
+        if (payment.rows[0].status !== 'paid') {
+            return res.status(400).json({ error: 'Solo se pueden reembolsar pagos completados' });
+        }
+
+        // Operators can only refund payments from their own active cash register
+        if (req.user.role === 'operator') {
+            const activeRegister = await query(
+                `SELECT cr.id FROM cash_registers cr WHERE cr.operator_id = $1 AND cr.status = 'open'`,
+                [req.user.id]
+            );
+            if (activeRegister.rows.length === 0) {
+                return res.status(403).json({ error: 'Debes tener una caja abierta para realizar reembolsos' });
+            }
+
+            // Check if payment was recorded in this register or has no register (hourly)
+            const txnCheck = await query(
+                `SELECT 1 FROM cash_register_transactions
+                 WHERE cash_register_id = $1 AND reference_id = $2 AND transaction_type = 'payment'`,
+                [activeRegister.rows[0].id, paymentId]
+            );
+            // Admin/super_admin can refund any payment; operators only their own register's payments
+            if (txnCheck.rows.length === 0) {
+                // Also allow if payment has no register txn (e.g. card payments, legacy)
+                const anyTxn = await query(
+                    `SELECT 1 FROM cash_register_transactions WHERE reference_id = $1 AND transaction_type = 'payment'`,
+                    [paymentId]
+                );
+                if (anyTxn.rows.length > 0) {
+                    return res.status(403).json({ error: 'Solo puedes reembolsar pagos registrados en tu caja' });
+                }
+            }
+        }
+
+        const refunded = await paymentService.refundPayment(paymentId, {
             requestingUser: req.user,
-            reason: reason || null,
+            reason: reason.trim(),
             req
         });
         res.json({ success: true, data: refunded });
