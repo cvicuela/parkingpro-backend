@@ -1,11 +1,17 @@
 const { query, transaction } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 
-// Prefijos NCF provisionales (demo - en producción vienen de DGII)
-const NCF_SERIES = {
-    consumer: 'B01',   // Factura consumidor final
-    fiscal:   'B14',   // Factura con valor fiscal (requiere RNC)
-    credit:   'B04'    // Nota de crédito
+// Tipos NCF según DGII (República Dominicana)
+// La secuencia y formato se obtienen de la tabla ncf_sequences via get_next_ncf()
+const NCF_TYPES = {
+    CREDITO_FISCAL: '01',   // B01 - Ventas B2B con ITBIS deducible (requiere RNC)
+    CONSUMO:        '02',   // B02 - Ventas a consumidores finales
+    NOTA_DEBITO:    '03',   // B03 - Nota de Débito
+    NOTA_CREDITO:   '04',   // B04 - Nota de Crédito
+    COMPRAS:        '11',   // B11 - Compras a proveedores informales
+    GASTOS_MENORES: '13',   // B13 - Gastos menores
+    REG_ESPECIAL:   '14',   // B14 - Regímenes Especiales
+    GUBERNAMENTAL:  '15',   // B15 - Comprobante Gubernamental
 };
 
 class InvoiceService {
@@ -41,7 +47,10 @@ class InvoiceService {
 
         const invoiceNumber = await this._nextInvoiceNumber();
         const hasRnc = payment.rnc && payment.rnc.trim().length > 0;
-        const ncf = `${hasRnc ? NCF_SERIES.fiscal : NCF_SERIES.consumer}${invoiceNumber.toString().padStart(8, '0')}`;
+
+        // B01 (Crédito Fiscal) si tiene RNC, B02 (Consumo) si no
+        const ncfType = hasRnc ? NCF_TYPES.CREDITO_FISCAL : NCF_TYPES.CONSUMO;
+        const ncf = await this._getNextNCF(ncfType);
 
         const customerName = payment.first_name
             ? `${payment.first_name} ${payment.last_name}`.trim()
@@ -99,7 +108,7 @@ class InvoiceService {
 
         const inv = original.rows[0];
         const invoiceNumber = await this._nextInvoiceNumber();
-        const ncf = `${NCF_SERIES.credit}${invoiceNumber.toString().padStart(8, '0')}`;
+        const ncf = await this._getNextNCF(NCF_TYPES.NOTA_CREDITO);
 
         const result = await query(
             `INSERT INTO invoices
@@ -185,6 +194,13 @@ class InvoiceService {
             `SELECT COALESCE(MAX(CAST(invoice_number AS INTEGER)), 0) + 1 as next_number FROM invoices`
         );
         return result.rows[0].next_number;
+    }
+
+    // ─── OBTENER SIGUIENTE NCF DESDE LA TABLA ncf_sequences (DGII) ─────────
+
+    async _getNextNCF(ncfType) {
+        const result = await query(`SELECT get_next_ncf($1) as ncf`, [ncfType]);
+        return result.rows[0].ncf;
     }
 
     // ─── ESTADÍSTICAS DE FACTURACIÓN ─────────────────────────────────────────
