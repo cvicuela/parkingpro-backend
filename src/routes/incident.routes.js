@@ -40,7 +40,25 @@ router.post('/', authenticate, async (req, res, next) => {
     );
     await logAudit({ userId: req.user.id, action: 'incident_created', entityType: 'incident',
       entityId: result.rows[0].id, details: { type, severity, title }, req });
-    res.status(201).json({ success: true, data: result.rows[0] });
+    const incident = result.rows[0];
+    res.status(201).json({ success: true, data: incident });
+
+    // Emit real-time update after creating incident
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to('dashboard').emit('incident_created', {
+          id: incident.id,
+          type: incident.type,
+          title: incident.title,
+          description: incident.description,
+          severity: incident.severity,
+          priority: incident.severity,
+          time: new Date().toISOString()
+        });
+      }
+    } catch (e) { /* non-critical */ }
+
   } catch (error) { next(error); }
 });
 

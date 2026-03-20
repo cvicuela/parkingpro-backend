@@ -3,9 +3,15 @@ const mockTransaction = jest.fn((cb) => cb({ query: mockQuery }));
 jest.mock('../src/config/database', () => ({
   query: mockQuery,
   transaction: mockTransaction,
-  supabase: {},
+  supabase: {
+    rpc: jest.fn().mockResolvedValue({ data: { success: true }, error: null }),
+  },
   pool: { end: jest.fn() },
   testConnection: jest.fn()
+}));
+
+jest.mock('../src/middleware/audit', () => ({
+  logAudit: jest.fn(),
 }));
 
 const PaymentService = require('../src/services/payment.service');
@@ -46,36 +52,54 @@ describe('PaymentService', () => {
   });
 
   describe('processCardNetPayment', () => {
-    it('should simulate when not configured', async () => {
+    it('should return pending when not configured and simulation not allowed', async () => {
       delete process.env.CARDNET_API_URL;
       delete process.env.CARDNET_API_KEY;
+      delete process.env.ALLOW_SIMULATED_PAYMENTS;
+
+      const result = await PaymentService.processCardNetPayment({ amount: 100 });
+      expect(result.status).toBe('pending');
+      expect(result.warning).toBeDefined();
+    });
+
+    it('should simulate when configured for simulation', async () => {
+      delete process.env.CARDNET_API_URL;
+      delete process.env.CARDNET_API_KEY;
+      process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
 
       const result = await PaymentService.processCardNetPayment({ amount: 100 });
       expect(result.status).toBe('paid');
       expect(result.simulated).toBe(true);
+
+      delete process.env.ALLOW_SIMULATED_PAYMENTS;
     });
   });
 
   describe('refundPayment', () => {
     it('should refund a paid payment', async () => {
       mockQuery
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', status: 'paid' }] })
-        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', status: 'refunded' }] });
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', status: 'paid', total_amount: '100' }] }) // initial lookup
+        .mockResolvedValueOnce({ rows: [] }) // invoice lookup (no invoice)
+        .mockResolvedValueOnce({ rows: [{ id: 'pay-1', status: 'refunded' }] }); // re-fetch after RPC
 
-      const result = await PaymentService.refundPayment('pay-1');
+      const { supabase } = require('../src/config/database');
+      supabase.rpc.mockResolvedValueOnce({ data: { success: true, id: 'pay-1' }, error: null });
+
+      const result = await PaymentService.refundPayment('pay-1', {});
+      expect(supabase.rpc).toHaveBeenCalledWith('refund_payment', expect.objectContaining({ p_id: 'pay-1' }));
       expect(result.status).toBe('refunded');
     });
 
     it('should throw for non-paid payment', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [{ id: 'pay-1', status: 'pending' }] });
 
-      await expect(PaymentService.refundPayment('pay-1')).rejects.toThrow('Solo se pueden reembolsar pagos completados');
+      await expect(PaymentService.refundPayment('pay-1', {})).rejects.toThrow('Solo se pueden reembolsar pagos completados');
     });
 
     it('should throw for non-existent payment', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [] });
 
-      await expect(PaymentService.refundPayment('nope')).rejects.toThrow('Pago no encontrado');
+      await expect(PaymentService.refundPayment('nope', {})).rejects.toThrow('Pago no encontrado');
     });
   });
 });

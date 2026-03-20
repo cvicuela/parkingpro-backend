@@ -5,6 +5,7 @@ const { query } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 const emailService = require('../services/email.service');
 const { TEMPLATES } = require('../services/emailTemplates');
+const pushService = require('../services/push.service');
 
 router.get('/', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
   try {
@@ -41,13 +42,14 @@ router.get('/stats', authenticate, authorize(['admin', 'super_admin']), async (r
       COUNT(*) FILTER (WHERE status = 'pending') as pending,
       COUNT(*) FILTER (WHERE channel = 'whatsapp') as whatsapp,
       COUNT(*) FILTER (WHERE channel = 'email') as email,
-      COUNT(*) FILTER (WHERE channel = 'sms') as sms
+      COUNT(*) FILTER (WHERE channel = 'sms') as sms,
+      COUNT(*) FILTER (WHERE channel = 'push') as push
     FROM notifications`);
     const r = result.rows[0];
     res.json({ success: true, data: {
       total: parseInt(r.total), sent: parseInt(r.sent), failed: parseInt(r.failed),
       pending: parseInt(r.pending),
-      by_channel: { whatsapp: parseInt(r.whatsapp), email: parseInt(r.email), sms: parseInt(r.sms) }
+      by_channel: { whatsapp: parseInt(r.whatsapp), email: parseInt(r.email), sms: parseInt(r.sms), push: parseInt(r.push) }
     }});
   } catch (error) { next(error); }
 });
@@ -108,7 +110,34 @@ router.post('/', authenticate, authorize(['admin', 'super_admin']), async (req, 
       return res.status(500).json({ success: false, error: emailResult.error });
     }
 
-    // For other channels (whatsapp, sms, push) - queue as pending
+    // Push notification channel - send immediately
+    if (channel === 'push') {
+      const payload = {
+        title: subject || 'ParkingPro',
+        body,
+        icon: '/favicon.svg',
+        badge: '/favicon.svg',
+        tag: 'parkingpro-notification',
+        data: { url: '/' },
+      };
+
+      const results = recipient === 'all'
+        ? await pushService.sendToAll(payload)
+        : await pushService.sendToUser(recipient, payload);
+
+      await query(
+        `INSERT INTO notifications (user_id, type, channel, recipient, subject, body, status, sent_at)
+         VALUES ($1, $2, 'push', $3, $4, $5, 'sent', NOW())`,
+        [req.user.id, type, recipient, subject, body]
+      );
+
+      await logAudit({ userId: req.user.id, action: 'notification_sent', entityType: 'notification',
+        details: { channel: 'push', recipient, results }, req });
+
+      return res.status(201).json({ success: true, data: results });
+    }
+
+    // For other channels (whatsapp, sms) - queue as pending
     const result = await query(
       `INSERT INTO notifications (user_id, type, channel, recipient, subject, body, status)
        VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING id`,
@@ -149,6 +178,105 @@ router.post('/process-queue', authenticate, authorize(['admin', 'super_admin']),
   try {
     const result = await emailService.processPendingEmails(req.body.limit || 10);
     res.json({ success: true, data: result });
+  } catch (error) { next(error); }
+});
+
+// ==================== PUSH NOTIFICATION ENDPOINTS ====================
+
+// Get VAPID public key (any authenticated user)
+router.get('/push/vapid-key', authenticate, (req, res) => {
+  const key = pushService.getPublicKey();
+  if (!key) {
+    return res.status(503).json({ success: false, error: 'Push notifications not configured' });
+  }
+  res.json({ success: true, data: { publicKey: key } });
+});
+
+// Subscribe to push notifications (any authenticated user)
+router.post('/push/subscribe', authenticate, async (req, res, next) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys) {
+      return res.status(400).json({ success: false, error: 'Invalid subscription object' });
+    }
+    const result = await pushService.saveSubscription(
+      req.user.id, subscription, req.headers['user-agent']
+    );
+    await logAudit({
+      userId: req.user.id, action: 'push_subscribed', entityType: 'push_subscription',
+      entityId: result.id, details: { endpoint: subscription.endpoint.substring(0, 50) }, req
+    });
+    res.status(201).json({ success: true, data: { id: result.id } });
+  } catch (error) { next(error); }
+});
+
+// Unsubscribe from push notifications (any authenticated user)
+router.post('/push/unsubscribe', authenticate, async (req, res, next) => {
+  try {
+    const { endpoint } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ success: false, error: 'Endpoint required' });
+    }
+    await pushService.removeSubscription(endpoint);
+    await logAudit({
+      userId: req.user.id, action: 'push_unsubscribed', entityType: 'push_subscription',
+      details: { endpoint: endpoint.substring(0, 50) }, req
+    });
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+// Send push notification (admin only)
+router.post('/push/send', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+  try {
+    const { title, body, target, userId: targetUserId, role, url, tag, requireInteraction } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ success: false, error: 'title and body are required' });
+    }
+
+    const payload = {
+      title,
+      body,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      tag: tag || 'parkingpro-notification',
+      data: { url: url || '/' },
+      requireInteraction: requireInteraction || false,
+    };
+
+    let results;
+    if (target === 'user' && targetUserId) {
+      results = await pushService.sendToUser(targetUserId, payload);
+    } else if (target === 'role' && role) {
+      results = await pushService.sendToRole(role, payload);
+    } else {
+      results = await pushService.sendToAll(payload);
+    }
+
+    // Log to notifications table
+    await query(
+      `INSERT INTO notifications (user_id, type, channel, recipient, subject, body, status, sent_at)
+       VALUES ($1, 'push', 'push', $2, $3, $4, 'sent', NOW())`,
+      [req.user.id, target === 'user' ? targetUserId : (target === 'role' ? `role:${role}` : 'all'), title, body]
+    );
+
+    await logAudit({
+      userId: req.user.id, action: 'push_sent', entityType: 'notification',
+      details: { target, results }, req
+    });
+
+    res.json({ success: true, data: results });
+  } catch (error) { next(error); }
+});
+
+// Get push subscription status for current user
+router.get('/push/status', authenticate, async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT id, endpoint, user_agent, created_at FROM push_subscriptions WHERE user_id = $1`,
+      [req.user.id]
+    );
+    res.json({ success: true, data: { subscriptions: result.rows, count: result.rows.length } });
   } catch (error) { next(error); }
 });
 

@@ -1235,6 +1235,97 @@ router.get('/today-summary', authenticate, authorize(['operator', 'admin', 'supe
     }
 });
 
+// ==================== OCCUPANCY BY HOUR ====================
+
+/**
+ * @route   GET /api/v1/reports/occupancy-by-hour
+ * @desc    Average occupancy broken down by hour of day
+ * @access  Private (Admin)
+ */
+router.get('/occupancy-by-hour', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { fromDate, toDate } = req.query;
+        let sql = `
+            SELECT
+                EXTRACT(HOUR FROM ae.created_at) as hour,
+                COUNT(*) FILTER (WHERE ae.event_type = 'entry') as entries,
+                COUNT(*) FILTER (WHERE ae.event_type = 'exit') as exits
+            FROM access_events ae
+            WHERE 1=1
+        `;
+        const params = [];
+        let idx = 1;
+        if (fromDate) { sql += ` AND ae.created_at >= $${idx++}`; params.push(fromDate); }
+        if (toDate) { sql += ` AND ae.created_at <= $${idx++}`; params.push(toDate); }
+        sql += ` GROUP BY hour ORDER BY hour`;
+
+        const result = await query(sql, params);
+        res.json({ success: true, data: { hours: result.rows } });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// ==================== REVENUE BY PAYMENT METHOD ====================
+
+/**
+ * @route   GET /api/v1/reports/revenue-by-method
+ * @desc    Revenue breakdown by payment provider (cash/card/cardnet)
+ * @access  Private (Admin)
+ */
+router.get('/revenue-by-method', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { fromDate, toDate } = req.query;
+        let sql = `
+            SELECT
+                provider,
+                COUNT(*) as count,
+                COALESCE(SUM(total_amount), 0) as total,
+                COALESCE(SUM(tax_amount), 0) as tax_total
+            FROM payments
+            WHERE status = 'paid'
+        `;
+        const params = [];
+        let idx = 1;
+        if (fromDate) { sql += ` AND created_at >= $${idx++}`; params.push(fromDate); }
+        if (toDate) { sql += ` AND created_at <= $${idx++}`; params.push(toDate); }
+        sql += ` GROUP BY provider ORDER BY total DESC`;
+
+        const result = await query(sql, params);
+        res.json({ success: true, data: { methods: result.rows } });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// ==================== TOP CUSTOMERS BY REVENUE ====================
+
+/**
+ * @route   GET /api/v1/reports/top-customers
+ * @desc    Top customers ranked by total revenue
+ * @access  Private (Admin)
+ */
+router.get('/top-customers', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { limit = 10 } = req.query;
+        const result = await query(`
+            SELECT
+                c.id, c.first_name, c.last_name, c.company_name,
+                COUNT(p.id) as payment_count,
+                COALESCE(SUM(p.total_amount), 0) as total_revenue
+            FROM customers c
+            JOIN subscriptions s ON s.customer_id = c.id
+            LEFT JOIN payments p ON p.subscription_id = s.id AND p.status = 'paid'
+            GROUP BY c.id, c.first_name, c.last_name, c.company_name
+            ORDER BY total_revenue DESC
+            LIMIT $1
+        `, [parseInt(limit)]);
+        res.json({ success: true, data: { customers: result.rows } });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // ==================== EXPORT CSV ====================
 
 /**

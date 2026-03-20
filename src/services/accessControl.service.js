@@ -2,6 +2,7 @@ const { query, transaction } = require('../config/database');
 const { isWithinInterval, getHours, getMinutes, addHours } = require('date-fns');
 const hourlyRateService = require('./hourlyRate.service');
 const rfidService = require('./rfid.service');
+const pushService = require('./push.service');
 
 /**
  * Servicio de Control de Acceso
@@ -367,6 +368,9 @@ class AccessControlService {
                     metadata
                 };
 
+                // Fire-and-forget push notification to admins
+                try { pushService.sendToRole('admin', { title: 'Entrada registrada', body: `Vehiculo ${vehiclePlate} ha ingresado`, tag: 'access-event', data: { url: '/control-acceso' } }); } catch {}
+
                 return result;
 
             } else if (validationResult.accessType === 'hourly') {
@@ -380,6 +384,9 @@ class AccessControlService {
                     }
                 );
 
+                // Fire-and-forget push notification to admins
+                try { pushService.sendToRole('admin', { title: 'Entrada registrada', body: `Vehiculo ${vehiclePlate} ha ingresado (por hora)`, tag: 'access-event', data: { url: '/control-acceso' } }); } catch {}
+
                 return {
                     type: 'hourly',
                     session
@@ -387,7 +394,7 @@ class AccessControlService {
             }
         });
     }
-    
+
     /**
      * Registrar salida
      */
@@ -420,6 +427,9 @@ class AccessControlService {
                     ]
                 );
 
+                // Fire-and-forget push notification to admins
+                try { pushService.sendToRole('admin', { title: 'Salida registrada', body: `Vehiculo ${vehiclePlate} ha salido`, tag: 'access-event', data: { url: '/control-acceso' } }); } catch {}
+
                 return {
                     type: 'subscription',
                     event: eventResult.rows[0],
@@ -443,6 +453,9 @@ class AccessControlService {
                 if (accessMethod === 'rfid' && rfidCard) {
                     exitResult.rfidPendingReturn = true;
                 }
+
+                // Fire-and-forget push notification to admins
+                try { pushService.sendToRole('admin', { title: 'Salida registrada', body: `Vehiculo ${vehiclePlate} ha salido (por hora)`, tag: 'access-event', data: { url: '/control-acceso' } }); } catch {}
 
                 return exitResult;
             }

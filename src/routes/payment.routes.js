@@ -65,6 +65,19 @@ router.post('/:id/refund', authenticate, authorize(['operator', 'admin', 'super_
             req
         });
         res.json({ success: true, data: refunded });
+
+        // Emit real-time update after refund
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('payment_received', {
+                    amount: -(refunded.total_amount || refunded.amount || 0),
+                    provider: refunded.payment_method || 'unknown',
+                    type: 'refund',
+                    time: new Date().toISOString()
+                });
+            }
+        } catch (e) { /* non-critical */ }
     } catch (error) {
         next(error);
     }
