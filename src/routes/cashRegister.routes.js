@@ -22,6 +22,21 @@ router.post('/open', authenticate, authorize(['operator', 'admin', 'super_admin'
         // Si la caja ya estaba abierta, retornar 200 en vez de 201
         const status = register.already_open ? 200 : 201;
         res.status(status).json({ success: true, data: register, already_open: !!register.already_open });
+
+        // Emit real-time update after opening register
+        try {
+            const io = req.app.get('io');
+            if (io && !register.already_open) {
+                io.to('dashboard').emit('cash_register_update', {
+                    action: 'opened',
+                    registerId: register.id,
+                    operatorId: req.user.id,
+                    openingBalance: parseFloat(openingBalance) || 0,
+                    time: new Date().toISOString()
+                });
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }
@@ -80,6 +95,22 @@ router.post('/:id/close', authenticate, authorize(['operator', 'admin', 'super_a
             req
         });
         res.json({ success: true, data: result });
+
+        // Emit real-time update after closing register
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('cash_register_update', {
+                    action: 'closed',
+                    registerId: req.params.id,
+                    operatorId: req.user.id,
+                    countedBalance: parseFloat(countedBalance),
+                    difference: result.difference,
+                    time: new Date().toISOString()
+                });
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }

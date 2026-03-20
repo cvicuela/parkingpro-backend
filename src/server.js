@@ -70,6 +70,10 @@ io.on('connection', (socket) => {
         socket.join('dashboard');
     });
 
+    socket.on('join_access_control', () => {
+        socket.join('access_control');
+    });
+
     socket.on('disconnect', () => {
         console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
     });

@@ -5,6 +5,23 @@ const { supabase } = require('../config/database');
 const accessControlService = require('../services/accessControl.service');
 const hourlyRateService = require('../services/hourlyRate.service');
 const qrcodeService = require('../services/qrcode.service');
+const { query: dbQuery } = require('../config/database');
+
+/**
+ * Helper: emit occupancy and session updates via Socket.IO
+ * Fire-and-forget, never blocks the response
+ */
+async function emitOccupancyAndSessionUpdates(io) {
+    if (!io) return;
+    try {
+        const occResult = await dbQuery('SELECT * FROM current_occupancy_by_plan');
+        io.to('dashboard').emit('occupancy_update', { plans: occResult.rows });
+    } catch (e) { /* non-critical */ }
+    try {
+        const sessResult = await dbQuery('SELECT * FROM active_parking_sessions LIMIT 20');
+        io.to('dashboard').emit('session_update', { sessions: sessResult.rows });
+    } catch (e) { /* non-critical */ }
+}
 
 /**
  * @route   POST /api/v1/access/validate
@@ -37,7 +54,20 @@ router.post('/validate', authenticate, authorize(['operator', 'admin', 'super_ad
             success: true,
             data: validationResult
         });
-        
+
+        // Emit real-time updates after successful validation
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit(type === 'entry' ? 'vehicle_entry' : 'vehicle_exit', {
+                    plate: vehiclePlate,
+                    type: validationResult.accessType || 'hourly',
+                    time: new Date().toISOString()
+                });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }
@@ -88,7 +118,25 @@ router.post('/entry', authenticate, authorize(['operator', 'admin', 'super_admin
             data: entry,
             qrCode
         });
-        
+
+        // Emit real-time updates after successful entry
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('vehicle_entry', {
+                    plate: vehiclePlate,
+                    type: validationResult.accessType || 'hourly',
+                    time: new Date().toISOString()
+                });
+                io.to('access_control').emit('vehicle_entry', {
+                    plate: vehiclePlate,
+                    type: validationResult.accessType || 'hourly',
+                    time: new Date().toISOString()
+                });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }
@@ -127,7 +175,25 @@ router.post('/exit', authenticate, authorize(['operator', 'admin', 'super_admin'
             message: 'Salida registrada exitosamente',
             data: exit
         });
-        
+
+        // Emit real-time updates after successful exit
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('vehicle_exit', {
+                    plate: vehiclePlate,
+                    type: validationResult.accessType || 'hourly',
+                    time: new Date().toISOString()
+                });
+                io.to('access_control').emit('vehicle_exit', {
+                    plate: vehiclePlate,
+                    type: validationResult.accessType || 'hourly',
+                    time: new Date().toISOString()
+                });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }
@@ -276,7 +342,20 @@ router.post('/sessions/:id/payment', authenticate, authorize(['operator', 'admin
             message: 'Pago registrado',
             data: session
         });
-        
+
+        // Emit real-time updates after session payment
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('payment_received', {
+                    amount: parseFloat(amount),
+                    provider: paymentMethod || 'cash',
+                    time: new Date().toISOString()
+                });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch (e) { /* non-critical */ }
+
     } catch (error) {
         next(error);
     }
