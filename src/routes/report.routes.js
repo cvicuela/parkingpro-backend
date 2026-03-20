@@ -970,9 +970,14 @@ router.get('/invoices', authenticate, authorize(['admin', 'super_admin']), async
         const byNCFType = await query(`
             SELECT
                 CASE
-                    WHEN ncf LIKE 'B01%' THEN 'Consumidor Final (B01)'
-                    WHEN ncf LIKE 'B14%' THEN 'Credito Fiscal (B14)'
-                    WHEN ncf LIKE 'B04%' THEN 'Nota de Credito (B04)'
+                    WHEN ncf LIKE 'B01%' THEN 'Crédito Fiscal (B01)'
+                    WHEN ncf LIKE 'B02%' THEN 'Consumidor Final (B02)'
+                    WHEN ncf LIKE 'B03%' THEN 'Nota de Débito (B03)'
+                    WHEN ncf LIKE 'B04%' THEN 'Nota de Crédito (B04)'
+                    WHEN ncf LIKE 'B11%' THEN 'Comprobante de Compras (B11)'
+                    WHEN ncf LIKE 'B13%' THEN 'Gastos Menores (B13)'
+                    WHEN ncf LIKE 'B14%' THEN 'Régimen Especial (B14)'
+                    WHEN ncf LIKE 'B15%' THEN 'Gubernamental (B15)'
                     ELSE 'Sin NCF'
                 END as ncf_type,
                 COUNT(*) as count,
@@ -981,9 +986,14 @@ router.get('/invoices', authenticate, authorize(['admin', 'super_admin']), async
             WHERE created_at >= $1 AND created_at <= $2
             GROUP BY
                 CASE
-                    WHEN ncf LIKE 'B01%' THEN 'Consumidor Final (B01)'
-                    WHEN ncf LIKE 'B14%' THEN 'Credito Fiscal (B14)'
-                    WHEN ncf LIKE 'B04%' THEN 'Nota de Credito (B04)'
+                    WHEN ncf LIKE 'B01%' THEN 'Crédito Fiscal (B01)'
+                    WHEN ncf LIKE 'B02%' THEN 'Consumidor Final (B02)'
+                    WHEN ncf LIKE 'B03%' THEN 'Nota de Débito (B03)'
+                    WHEN ncf LIKE 'B04%' THEN 'Nota de Crédito (B04)'
+                    WHEN ncf LIKE 'B11%' THEN 'Comprobante de Compras (B11)'
+                    WHEN ncf LIKE 'B13%' THEN 'Gastos Menores (B13)'
+                    WHEN ncf LIKE 'B14%' THEN 'Régimen Especial (B14)'
+                    WHEN ncf LIKE 'B15%' THEN 'Gubernamental (B15)'
                     ELSE 'Sin NCF'
                 END
             ORDER BY count DESC
