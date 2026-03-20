@@ -50,6 +50,22 @@ class InvoiceService {
 
         // B01 (Crédito Fiscal) si tiene RNC, B02 (Consumo) si no
         const ncfType = hasRnc ? NCF_TYPES.CREDITO_FISCAL : NCF_TYPES.CONSUMO;
+
+        // Para B01, validar que el RNC exista en el registro DGII local
+        if (ncfType === NCF_TYPES.CREDITO_FISCAL) {
+            const cleanRnc = payment.rnc.replace(/[-\s]/g, '');
+            const rncCheck = await query(
+                `SELECT rnc, business_name, status FROM dgii_rnc_registry WHERE rnc = $1`,
+                [cleanRnc]
+            );
+            if (rncCheck.rows.length === 0) {
+                throw new Error(`RNC ${payment.rnc} no encontrado en el registro DGII local. Actualice la base de datos DGII o use B02 (Consumo).`);
+            }
+            if (rncCheck.rows[0].status !== 'active') {
+                throw new Error(`RNC ${payment.rnc} tiene estado "${rncCheck.rows[0].status}" en DGII. No se puede emitir B01.`);
+            }
+        }
+
         const ncf = await this._getNextNCF(ncfType);
 
         const customerName = payment.first_name
