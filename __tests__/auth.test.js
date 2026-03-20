@@ -123,6 +123,8 @@ describe('Auth Routes', () => {
       const userId = '123e4567-e89b-12d3-a456-426614174000';
       const token = jwt.sign({ userId }, process.env.JWT_SECRET);
 
+      // authenticate middleware: session lookup
+      mockQuery.mockResolvedValueOnce({ rows: [{ token: token }] });
       // authenticate middleware: user lookup
       mockQuery.mockResolvedValueOnce({
         rows: [{ id: userId, email: 'test@test.com', role: 'operator', status: 'active' }]
