@@ -98,20 +98,20 @@ class PaymentService {
     }
 
     async processCardNetPayment({ amount, metadata }) {
-        const cardnetUrl = process.env.CARDNET_API_URL;
-        const cardnetKey = process.env.CARDNET_API_KEY;
+        const cardnetService = require('./cardnet.service');
 
-        if (!cardnetUrl || !cardnetKey) {
-            if (!ALLOW_SIMULATED_PAYMENTS) {
-                console.warn('[Payment] WARNING: CardNet is not configured and ALLOW_SIMULATED_PAYMENTS is false. Payment will not be charged.');
+        if (!cardnetService.isConfigured()) {
+            const allowSimulated = process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
+            if (!allowSimulated) {
+                console.warn('[Payment] CardNet not configured and simulation not allowed');
                 return {
                     status: 'pending',
-                    transaction_id: `CARDNET-UNCONFIGURED-${Date.now()}`,
+                    transaction_id: `CARDNET-PENDING-${Date.now()}`,
                     amount,
-                    warning: 'CardNet no configurado y pagos simulados no permitidos - pago pendiente sin cobro real'
+                    warning: 'CardNet no configurado. Configure CARDNET_MERCHANT_ID y CARDNET_API_KEY.'
                 };
             }
-            console.warn('[Payment] WARNING: CardNet is not configured. Returning simulated payment (ALLOW_SIMULATED_PAYMENTS=true).');
+            console.warn('[Payment] CardNet not configured - using simulated payment');
             return {
                 status: 'paid',
                 transaction_id: `CARDNET-SIM-${Date.now()}`,
@@ -121,10 +121,34 @@ class PaymentService {
             };
         }
 
+        // Real CardNet payment
+        const { cardNumber, cardExpMonth, cardExpYear, cardCvv, cardHolderName } = metadata;
+
+        if (!cardNumber || !cardExpMonth || !cardExpYear || !cardCvv) {
+            throw new Error('Datos de tarjeta requeridos: cardNumber, cardExpMonth, cardExpYear, cardCvv');
+        }
+
+        const result = await cardnetService.processSale({
+            amount,
+            currency: 'DOP',
+            cardNumber,
+            cardExpMonth,
+            cardExpYear,
+            cardCvv,
+            cardHolderName: cardHolderName || 'PARKING CLIENT',
+            description: metadata.description || 'Pago estacionamiento ParkingPro',
+            orderId: metadata.orderId || `PP-${Date.now()}`
+        });
+
         return {
-            status: 'paid',
-            transaction_id: `CARDNET-${Date.now()}`,
-            amount
+            status: result.status,
+            transaction_id: result.transactionId,
+            authorization_code: result.authorizationCode,
+            card_brand: result.cardBrand,
+            card_last_four: cardNumber.slice(-4),
+            amount,
+            response_code: result.responseCode,
+            response_message: result.responseMessage
         };
     }
 
