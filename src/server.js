@@ -30,6 +30,7 @@ const zktecoRoutes = require('./routes/zkteco.routes');
 const expenseRoutes = require('./routes/expense.routes');
 const incidentRoutes = require('./routes/incident.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const terminalRoutes = require('./routes/terminal.routes');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -162,6 +163,7 @@ app.use('/api/v1/zkteco', zktecoRoutes);
 app.use('/api/v1/expenses', expenseRoutes);
 app.use('/api/v1/incidents', incidentRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/terminals', terminalRoutes);
 
 // ==================== SPA FALLBACK ====================
 
