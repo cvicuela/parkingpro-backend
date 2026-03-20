@@ -2,6 +2,7 @@ const { query, transaction, supabase } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 
 const REFUND_LIMIT_OPERATOR = parseFloat(process.env.REFUND_LIMIT_OPERATOR) || 500;
+const ALLOW_SIMULATED_PAYMENTS = process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
 
 class PaymentService {
     constructor() {
@@ -24,6 +25,15 @@ class PaymentService {
         return await transaction(async (client) => {
             const providerResult = await handler({ amount: totalAmount, metadata });
 
+            // Build enriched metadata, storing simulation flags when present
+            const enrichedMetadata = { ...metadata, provider_response: providerResult };
+            if (providerResult.simulated) {
+                enrichedMetadata.simulated = true;
+                if (providerResult.status === 'paid') {
+                    enrichedMetadata.simulated_at = new Date().toISOString();
+                }
+            }
+
             const result = await client.query(
                 `INSERT INTO payments (
                     subscription_id, customer_id, amount, tax_amount, total_amount,
@@ -39,7 +49,7 @@ class PaymentService {
                     providerResult.status,
                     provider,
                     providerResult.status === 'paid' ? new Date() : null,
-                    JSON.stringify({ ...metadata, provider_response: providerResult })
+                    JSON.stringify(enrichedMetadata)
                 ]
             );
 
@@ -92,12 +102,22 @@ class PaymentService {
         const cardnetKey = process.env.CARDNET_API_KEY;
 
         if (!cardnetUrl || !cardnetKey) {
+            if (!ALLOW_SIMULATED_PAYMENTS) {
+                console.warn('[Payment] WARNING: CardNet is not configured and ALLOW_SIMULATED_PAYMENTS is false. Payment will not be charged.');
+                return {
+                    status: 'pending',
+                    transaction_id: `CARDNET-UNCONFIGURED-${Date.now()}`,
+                    amount,
+                    warning: 'CardNet no configurado y pagos simulados no permitidos - pago pendiente sin cobro real'
+                };
+            }
+            console.warn('[Payment] WARNING: CardNet is not configured. Returning simulated payment (ALLOW_SIMULATED_PAYMENTS=true).');
             return {
                 status: 'paid',
                 transaction_id: `CARDNET-SIM-${Date.now()}`,
                 amount,
                 simulated: true,
-                message: 'CardNet no configurado - pago simulado'
+                warning: 'SIMULATED PAYMENT - not charged'
             };
         }
 
@@ -111,12 +131,22 @@ class PaymentService {
     async processStripePayment({ amount, metadata }) {
         const stripeKey = process.env.STRIPE_SECRET_KEY;
         if (!stripeKey || stripeKey.startsWith('sk_test_your')) {
+            if (!ALLOW_SIMULATED_PAYMENTS) {
+                console.warn('[Payment] WARNING: Stripe is not configured and ALLOW_SIMULATED_PAYMENTS is false. Payment will not be charged.');
+                return {
+                    status: 'pending',
+                    transaction_id: `STRIPE-UNCONFIGURED-${Date.now()}`,
+                    amount,
+                    warning: 'Stripe no configurado y pagos simulados no permitidos - pago pendiente sin cobro real'
+                };
+            }
+            console.warn('[Payment] WARNING: Stripe is not configured. Returning simulated payment (ALLOW_SIMULATED_PAYMENTS=true).');
             return {
                 status: 'paid',
                 transaction_id: `STRIPE-SIM-${Date.now()}`,
                 amount,
                 simulated: true,
-                message: 'Stripe no configurado - pago simulado'
+                warning: 'SIMULATED PAYMENT - not charged'
             };
         }
 
