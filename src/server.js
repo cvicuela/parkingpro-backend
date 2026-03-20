@@ -32,7 +32,7 @@ const notificationRoutes = require('./routes/notification.routes');
 const terminalRoutes = require('./routes/terminal.routes');
 
 // Middleware de seguridad
-const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter } = require('./middleware/rateLimiter');
+const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter, sensitiveOpsLimiter, reportLimiter } = require('./middleware/rateLimiter');
 const sanitizer = require('./middleware/sanitizer');
 
 // Middleware de error
@@ -87,6 +87,16 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false
 }));
 
+// Additional security headers
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+});
+
 // CORS
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -140,15 +150,15 @@ app.use('/api/v1/plans', planRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/payments', paymentLimiter, paymentRoutes);
 app.use('/api/v1/access', accessRoutes);
-app.use('/api/v1/reports', reportRoutes);
-app.use('/api/v1/settings', settingRoutes);
+app.use('/api/v1/reports', reportLimiter, reportRoutes);
+app.use('/api/v1/settings', sensitiveOpsLimiter, settingRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/arduino', arduinoRoutes);
 app.use('/api/v1/cash-registers', cashRegisterRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/rfid', rfidRoutes);
-app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/users', sensitiveOpsLimiter, userRoutes);
 app.use('/api/v1/zkteco', deviceLimiter, zktecoRoutes);
 app.use('/api/v1/expenses', expenseRoutes);
 app.use('/api/v1/incidents', incidentRoutes);

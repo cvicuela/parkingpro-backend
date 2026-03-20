@@ -45,6 +45,12 @@ function sanitizeValue(obj) {
  * Express middleware that sanitizes req.body, req.query, and req.params.
  */
 function sanitizer(req, res, next) {
+    // Reject excessively long query strings (potential DoS)
+    const queryString = req.originalUrl.split('?')[1] || '';
+    if (queryString.length > 2048) {
+        return res.status(414).json({ error: 'Query string too long' });
+    }
+
     if (req.body && typeof req.body === 'object') {
         req.body = sanitizeValue(req.body);
     }

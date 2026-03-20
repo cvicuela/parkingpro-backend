@@ -12,6 +12,10 @@ const pool = new Pool({
 });
 
 async function query(text, params) {
+    // Warn in dev mode if query appears to have string interpolation
+    if (process.env.NODE_ENV === 'development' && (text.includes("' +") || text.includes("' ||"))) {
+        console.warn('[Security] Potential SQL injection pattern detected in query');
+    }
     const res = await pool.query(text, params);
     return res;
 }

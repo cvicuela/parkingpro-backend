@@ -21,6 +21,12 @@ router.post('/register', async (req, res, next) => {
             });
         }
 
+        // Input length validation
+        if (email && email.length > 255) return res.status(400).json({ error: 'Email too long' });
+        if (password && password.length > 128) return res.status(400).json({ error: 'Password too long' });
+        if (password && password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        if (phone && phone.length > 20) return res.status(400).json({ error: 'Phone number too long' });
+
         // Password complexity check
         if (password.length < 8) {
             return res.status(400).json({
@@ -108,7 +114,12 @@ router.post('/login', async (req, res, next) => {
                 error: 'Email y contraseña son requeridos'
             });
         }
-        
+
+        // Input length validation
+        if (email && email.length > 255) return res.status(400).json({ error: 'Email too long' });
+        if (password && password.length > 128) return res.status(400).json({ error: 'Password too long' });
+        if (password && password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
         // Buscar usuario
         const result = await query(
             `SELECT * FROM users WHERE email = $1 AND status = 'active'`,

@@ -36,4 +36,22 @@ const paymentLimiter = rateLimit({
     message: { error: 'Demasiadas solicitudes de pago. Intenta de nuevo.' }
 });
 
-module.exports = { apiLimiter, authLimiter, deviceLimiter, paymentLimiter };
+// Sensitive operations - strict limiting
+const sensitiveOpsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'Demasiadas operaciones sensibles, intente mas tarde' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Report generation - prevent abuse
+const reportLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: { error: 'Demasiadas solicitudes de reportes, intente mas tarde' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+module.exports = { apiLimiter, authLimiter, deviceLimiter, paymentLimiter, sensitiveOpsLimiter, reportLimiter };
