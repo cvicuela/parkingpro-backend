@@ -730,3 +730,20 @@ LEFT JOIN customers c ON ps.customer_id = c.id
 JOIN plans p ON ps.plan_id = p.id
 WHERE ps.status = 'active'
 ORDER BY ps.entry_time DESC;
+
+-- ============================================
+-- PUSH NOTIFICATION SUBSCRIPTIONS
+-- ============================================
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT UNIQUE NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subs_endpoint ON push_subscriptions(endpoint);
