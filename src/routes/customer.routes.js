@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { query } = require('../config/database');
+const { isValidRNC, isValidCedula, isValidIdDocument, isValidEmail, isValidDRPhone, cleanDigits } = require('../middleware/validators');
 
 /**
  * @route   GET /api/v1/customers
@@ -96,6 +97,23 @@ router.post('/', authenticate, authorize(['admin', 'super_admin']), async (req, 
                 error: 'Email, teléfono, nombre y apellido son requeridos'
             });
         }
+
+        // Validar formatos dominicanos
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ error: 'Formato de email inválido' });
+        }
+        if (!isValidDRPhone(phone)) {
+            return res.status(400).json({ error: 'Formato de teléfono inválido (ej: 809-555-1234)' });
+        }
+        if (rnc && !isValidRNC(rnc)) {
+            return res.status(400).json({ error: 'RNC inválido (debe tener 9 dígitos)' });
+        }
+        if (idDocument && !isValidIdDocument(idDocument)) {
+            return res.status(400).json({ error: 'Cédula/documento inválido (debe tener 11 dígitos con formato XXX-XXXXXXX-X)' });
+        }
+        if (isCompany && !rnc) {
+            return res.status(400).json({ error: 'RNC es requerido para empresas' });
+        }
         
         // Crear usuario primero
         const userResult = await query(
@@ -142,14 +160,22 @@ router.patch('/:id', authenticate, authorize(['operator', 'admin', 'super_admin'
         const values = [];
         let paramCount = 1;
         
+        // Validate DR formats on update
+        if (updates.rnc && !isValidRNC(updates.rnc)) {
+            return res.status(400).json({ error: 'RNC inválido (debe tener 9 dígitos)' });
+        }
+        if (updates.idDocument && !isValidIdDocument(updates.idDocument)) {
+            return res.status(400).json({ error: 'Cédula/documento inválido' });
+        }
+
         const allowedFields = [
             'first_name', 'last_name', 'id_document', 'rnc',
             'is_company', 'company_name', 'address', 'notes'
         ];
-        
+
         for (const [key, value] of Object.entries(updates)) {
             const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-            
+
             if (allowedFields.includes(snakeKey)) {
                 fields.push(`${snakeKey} = $${paramCount}`);
                 values.push(value);
