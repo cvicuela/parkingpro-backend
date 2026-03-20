@@ -1,5 +1,8 @@
 -- ============================================
 -- SEED DATA - PARKINGPRO
+-- Datos base para demo operativo.
+-- Las facturas se generan vía el sistema con NCF correcto.
+-- Las secuencias NCF se gestionan desde ncf_sequences (migración 012).
 -- ============================================
 
 -- Limpiar datos existentes (en orden inverso por dependencias)
@@ -10,8 +13,6 @@ TRUNCATE TABLE
     cash_register_transactions,
     cash_registers,
     expenses,
-    ncf_sequences,
-    settings,
     incidents,
     parking_sessions,
     access_events,
@@ -26,6 +27,9 @@ TRUNCATE TABLE
     otp_codes,
     users
 CASCADE;
+
+-- Resetear secuencias NCF a 0 (sin borrar la configuración)
+UPDATE ncf_sequences SET current_number = 0, updated_at = NOW();
 
 -- ============================================
 -- USUARIOS
@@ -144,7 +148,7 @@ INSERT INTO plans (
     3
 );
 
--- Plan Por Hora (NUEVO)
+-- Plan Por Hora
 INSERT INTO plans (
     id, name, type, description, base_price, weekly_price,
     start_hour, end_hour, crosses_midnight, tolerance_minutes,
@@ -154,31 +158,28 @@ INSERT INTO plans (
     'Por Hora',
     'hourly',
     'Pago por hora de uso (1ra hora: RD$50, 2da: RD$70, 3ra+: RD$100)',
-    50.00, -- Base price es la primera hora
+    50.00,
     NULL,
     NULL,
     NULL,
     false,
-    5, -- 5 minutos de tolerancia
-    40, -- 40 espacios dedicados a por hora
-    999, -- Sin límite de entradas
+    5,
+    40,
+    999,
     4
 );
 
 -- ============================================
--- TARIFAS POR HORA (NUEVO)
+-- TARIFAS POR HORA
 -- ============================================
 
--- Tarifas para el plan "Por Hora"
 INSERT INTO hourly_rates (plan_id, hour_number, rate, description) VALUES
 ('00000000-0000-0000-0000-000000000404', 1, 50.00, 'Primera hora'),
 ('00000000-0000-0000-0000-000000000404', 2, 70.00, 'Segunda hora'),
 ('00000000-0000-0000-0000-000000000404', 3, 100.00, 'Tercera hora en adelante');
 
--- Nota: Para hora 4, 5, 6, etc. se usa la tarifa de la hora 3 (100.00)
-
 -- ============================================
--- SUSCRIPCIONES
+-- SUSCRIPCIONES (fechas relativas al momento de seed)
 -- ============================================
 
 -- Carlos - Plan 24 Horas (activo)
@@ -194,11 +195,11 @@ INSERT INTO subscriptions (
     '00000000-0000-0000-0000-000000000301',
     '00000000-0000-0000-0000-000000000403',
     'active',
-    '2024-01-15',
-    '2024-01-15',
-    '2024-02-15',
-    '2024-01-15',
-    '2024-02-15',
+    CURRENT_DATE - INTERVAL '15 days',
+    CURRENT_DATE - INTERVAL '15 days',
+    CURRENT_DATE + INTERVAL '15 days',
+    CURRENT_DATE - INTERVAL '15 days',
+    CURRENT_DATE + INTERVAL '15 days',
     'monthly',
     3500.00,
     0.18,
@@ -219,11 +220,11 @@ INSERT INTO subscriptions (
     '00000000-0000-0000-0000-000000000302',
     '00000000-0000-0000-0000-000000000401',
     'active',
-    '2024-01-20',
-    '2024-01-20',
-    '2024-02-20',
-    '2024-01-20',
-    '2024-02-20',
+    CURRENT_DATE - INTERVAL '10 days',
+    CURRENT_DATE - INTERVAL '10 days',
+    CURRENT_DATE + INTERVAL '20 days',
+    CURRENT_DATE - INTERVAL '10 days',
+    CURRENT_DATE + INTERVAL '20 days',
     'monthly',
     2500.00,
     0.18,
@@ -231,7 +232,7 @@ INSERT INTO subscriptions (
     'https://api.qrserver.com/v1/create-qr-code/?data=QR-SUB-2-B789012&size=300x300'
 );
 
--- Tech Solutions - Plan Nocturno (vencido para testing)
+-- Tech Solutions - Plan Nocturno (past_due para testing)
 INSERT INTO subscriptions (
     id, customer_id, vehicle_id, plan_id,
     status, started_at, activated_at, next_billing_date,
@@ -244,11 +245,11 @@ INSERT INTO subscriptions (
     '00000000-0000-0000-0000-000000000303',
     '00000000-0000-0000-0000-000000000402',
     'past_due',
-    '2024-01-01',
-    '2024-01-01',
-    '2024-02-01',
-    '2024-01-01',
-    '2024-02-01',
+    CURRENT_DATE - INTERVAL '45 days',
+    CURRENT_DATE - INTERVAL '45 days',
+    CURRENT_DATE - INTERVAL '15 days',
+    CURRENT_DATE - INTERVAL '45 days',
+    CURRENT_DATE - INTERVAL '15 days',
     'monthly',
     2000.00,
     0.18,
@@ -257,7 +258,7 @@ INSERT INTO subscriptions (
 );
 
 -- ============================================
--- PAGOS
+-- PAGOS (sin facturas - se generan vía el sistema con NCF)
 -- ============================================
 
 -- Pago de Carlos (exitoso)
@@ -277,7 +278,7 @@ INSERT INTO payments (
     'card',
     'visa',
     '4242',
-    '2024-01-15 10:30:00'
+    NOW() - INTERVAL '15 days'
 );
 
 -- Pago de María (exitoso)
@@ -297,7 +298,7 @@ INSERT INTO payments (
     'card',
     'mastercard',
     '5555',
-    '2024-01-20 14:15:00'
+    NOW() - INTERVAL '10 days'
 );
 
 -- Pago fallido de Tech Solutions
@@ -317,44 +318,16 @@ INSERT INTO payments (
     'card',
     'visa',
     '1234',
-    '2024-02-01 08:00:00',
+    NOW() - INTERVAL '15 days',
     'insufficient_funds',
     1
 );
 
 -- ============================================
--- FACTURAS
+-- NOTA: NO se insertan facturas (invoices) aquí.
+-- Las facturas se generan desde el sistema usando get_next_ncf()
+-- para asignar comprobantes fiscales válidos (DGII).
 -- ============================================
-
-INSERT INTO invoices (
-    id, payment_id, customer_id,
-    invoice_number, subtotal, tax_amount, total,
-    items
-) VALUES (
-    '00000000-0000-0000-0000-000000000701',
-    '00000000-0000-0000-0000-000000000601',
-    '00000000-0000-0000-0000-000000000201',
-    '00001',
-    3500.00,
-    630.00,
-    4130.00,
-    '[{"description": "Plan 24 Horas (mensual)", "quantity": 1, "unit_price": 3500.00, "total": 3500.00}]'
-);
-
-INSERT INTO invoices (
-    id, payment_id, customer_id,
-    invoice_number, subtotal, tax_amount, total,
-    items
-) VALUES (
-    '00000000-0000-0000-0000-000000000702',
-    '00000000-0000-0000-0000-000000000602',
-    '00000000-0000-0000-0000-000000000202',
-    '00002',
-    2500.00,
-    450.00,
-    2950.00,
-    '[{"description": "Plan Diurno (mensual)", "quantity": 1, "unit_price": 2500.00, "total": 2500.00}]'
-);
 
 -- ============================================
 -- EVENTOS DE ACCESO
@@ -376,22 +349,22 @@ INSERT INTO access_events (
 ('00000000-0000-0000-0000-000000000502', '00000000-0000-0000-0000-000000000302', 'B789012', 'entry', NOW() - INTERVAL '3 hours', 'qr', true);
 
 -- ============================================
--- SESIONES DE PARQUEO POR HORA (NUEVO)
+-- SESIONES DE PARQUEO POR HORA
 -- ============================================
 
--- Ejemplo: Vehículo en parqueo por hora (activo)
+-- Vehículo en parqueo por hora (activo)
 INSERT INTO parking_sessions (
     vehicle_plate, plan_id, entry_time,
     status, assigned_spot
 ) VALUES (
-    'X999888', -- Vehículo sin suscripción, usando parqueo por hora
+    'X999888',
     '00000000-0000-0000-0000-000000000404',
     NOW() - INTERVAL '1 hour 30 minutes',
     'active',
     'H-15'
 );
 
--- Ejemplo: Sesión completada y pagada
+-- Sesión completada y pagada
 INSERT INTO parking_sessions (
     vehicle_plate, plan_id, entry_time, exit_time,
     duration_minutes, calculated_amount, paid_amount,
@@ -401,8 +374,8 @@ INSERT INTO parking_sessions (
     '00000000-0000-0000-0000-000000000404',
     NOW() - INTERVAL '5 hours',
     NOW() - INTERVAL '2 hours',
-    180, -- 3 horas
-    220.00, -- 50 + 70 + 100
+    180,
+    220.00,
     220.00,
     'paid',
     'paid',
@@ -410,7 +383,8 @@ INSERT INTO parking_sessions (
 );
 
 -- ============================================
--- CONFIGURACIÓN
+-- CONFIGURACIÓN (solo operativa, sin NCF)
+-- Las secuencias NCF se inicializan en migración 012.
 -- ============================================
 
 INSERT INTO settings (key, value, description, category) VALUES
@@ -444,21 +418,15 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('cash.refund_daily_multiplier', '"3"', 'Multiplicador límite diario reembolsos', 'cash'),
 ('cash.multi_register_enabled', '"false"', 'Permitir múltiples cajas simultáneas', 'cash'),
 ('cash.alert_email', '"alonsoveloz@gmail.com"', 'Email para alertas de caja', 'cash'),
-('invoice.ncf_series_consumer', '"B01"', 'Serie NCF consumidor final (provisional)', 'invoice'),
-('invoice.ncf_series_fiscal', '"B14"', 'Serie NCF valor fiscal (provisional)', 'invoice'),
-('invoice.ncf_series_credit', '"B04"', 'Serie NCF notas de crédito (provisional)', 'invoice'),
-('invoice.business_name', '"ParkingPro"', 'Nombre del negocio en facturas', 'invoice'),
-('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice'),
 
-('terminal_sequence_start', '"1"', 'Numero inicial del rango de comprobantes del terminal', 'facturacion'),
-('terminal_sequence_end', '"999999"', 'Numero final del rango de comprobantes del terminal', 'facturacion'),
-('terminal_sequence_current', '"1"', 'Proximo numero de comprobante a emitir', 'facturacion');
+('invoice.business_name', '"ParkingPro"', 'Nombre del negocio en facturas', 'invoice'),
+('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice')
+ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
 -- ACTUALIZAR OCUPACIÓN DE PLANES
 -- ============================================
 
--- Actualizar current_occupancy basado en suscripciones activas
 UPDATE plans p
 SET current_occupancy = (
     SELECT COUNT(*)
@@ -470,8 +438,7 @@ SET current_occupancy = (
 -- VERIFICACIÓN
 -- ============================================
 
--- Mostrar resumen
-SELECT 
+SELECT
     'Users' as table_name, COUNT(*) as count FROM users
 UNION ALL
 SELECT 'Customers', COUNT(*) FROM customers
@@ -493,5 +460,7 @@ UNION ALL
 SELECT 'Parking Sessions', COUNT(*) FROM parking_sessions
 UNION ALL
 SELECT 'Settings', COUNT(*) FROM settings
+UNION ALL
+SELECT 'NCF Sequences', COUNT(*) FROM ncf_sequences
 UNION ALL
 SELECT 'Cash Registers', COUNT(*) FROM cash_registers;
