@@ -1085,6 +1085,156 @@ router.get('/incidents', authenticate, authorize(['admin', 'super_admin']), asyn
     }
 });
 
+// ==================== REVENUE DAILY ====================
+
+/**
+ * @route   GET /api/v1/reports/revenue-daily
+ * @desc    Ingresos diarios para los ultimos N dias con desglose por metodo de pago
+ * @access  Private (Operator, Admin)
+ */
+router.get('/revenue-daily', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        let days = parseInt(req.query.days) || 7;
+        if (days < 1) days = 1;
+        if (days > 30) days = 30;
+
+        const spanishDays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+        // Revenue totals per day
+        const revenueResult = await query(
+            `SELECT DATE(paid_at) as date, SUM(total_amount) as revenue, COUNT(*) as count
+             FROM payments
+             WHERE status = 'paid'
+               AND paid_at >= NOW() - INTERVAL '1 day' * $1
+             GROUP BY DATE(paid_at)
+             ORDER BY date`,
+            [days]
+        );
+
+        // Revenue per day broken down by payment method
+        const byMethodResult = await query(
+            `SELECT DATE(paid_at) as date,
+                    COALESCE(payment_method, 'unknown') as method,
+                    SUM(total_amount) as amount
+             FROM payments
+             WHERE status = 'paid'
+               AND paid_at >= NOW() - INTERVAL '1 day' * $1
+             GROUP BY DATE(paid_at), payment_method
+             ORDER BY date`,
+            [days]
+        );
+
+        // Index by-method rows by date for easy lookup
+        const methodsByDate = {};
+        for (const row of byMethodResult.rows) {
+            const dateKey = row.date instanceof Date
+                ? row.date.toISOString().split('T')[0]
+                : String(row.date);
+            if (!methodsByDate[dateKey]) methodsByDate[dateKey] = {};
+            methodsByDate[dateKey][row.method] = parseFloat(row.amount);
+        }
+
+        const data = revenueResult.rows.map(row => {
+            const dateKey = row.date instanceof Date
+                ? row.date.toISOString().split('T')[0]
+                : String(row.date);
+            const dayOfWeek = new Date(dateKey + 'T00:00:00').getDay();
+            return {
+                date: dateKey,
+                day_label: spanishDays[dayOfWeek],
+                revenue: parseFloat(row.revenue),
+                count: parseInt(row.count),
+                by_method: methodsByDate[dateKey] || {}
+            };
+        });
+
+        res.json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// ==================== TODAY SUMMARY ====================
+
+/**
+ * @route   GET /api/v1/reports/today-summary
+ * @desc    Resumen rapido del dia de hoy: entradas, salidas, pagos e ingresos
+ * @access  Private (Operator, Admin)
+ */
+router.get('/today-summary', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        // Entries and exits from access_events today
+        const accessResult = await query(`
+            SELECT
+                COUNT(*) FILTER (WHERE type = 'entry') as entries,
+                COUNT(*) FILTER (WHERE type = 'exit')  as exits
+            FROM access_events
+            WHERE timestamp >= CURRENT_DATE
+              AND timestamp <  CURRENT_DATE + INTERVAL '1 day'
+        `);
+
+        // Payments count and revenue today, broken down by method
+        const paymentsResult = await query(`
+            SELECT COUNT(*) as payments_count,
+                   COALESCE(SUM(total_amount), 0) as revenue_today
+            FROM payments
+            WHERE status = 'paid'
+              AND paid_at >= CURRENT_DATE
+              AND paid_at <  CURRENT_DATE + INTERVAL '1 day'
+        `);
+
+        const byMethodResult = await query(`
+            SELECT COALESCE(payment_method, 'unknown') as method,
+                   COALESCE(SUM(total_amount), 0) as amount
+            FROM payments
+            WHERE status = 'paid'
+              AND paid_at >= CURRENT_DATE
+              AND paid_at <  CURRENT_DATE + INTERVAL '1 day'
+            GROUP BY payment_method
+        `);
+
+        // Collection rate: paid sessions / total sessions that ended today
+        const collectionResult = await query(`
+            SELECT
+                COUNT(*) as total_sessions,
+                COUNT(*) FILTER (WHERE payment_status = 'paid') as paid_sessions
+            FROM parking_sessions
+            WHERE entry_time >= CURRENT_DATE
+              AND entry_time <  CURRENT_DATE + INTERVAL '1 day'
+        `);
+
+        const entries = parseInt(accessResult.rows[0].entries);
+        const exits = parseInt(accessResult.rows[0].exits);
+        const paymentsCount = parseInt(paymentsResult.rows[0].payments_count);
+        const revenueToday = parseFloat(paymentsResult.rows[0].revenue_today);
+
+        const totalSessions = parseInt(collectionResult.rows[0].total_sessions);
+        const paidSessions = parseInt(collectionResult.rows[0].paid_sessions);
+        const collectionRate = totalSessions > 0
+            ? Math.round((paidSessions / totalSessions * 100) * 10) / 10
+            : 0;
+
+        const byMethod = {};
+        for (const row of byMethodResult.rows) {
+            byMethod[row.method] = parseFloat(row.amount);
+        }
+
+        res.json({
+            success: true,
+            data: {
+                entries,
+                exits,
+                payments_count: paymentsCount,
+                revenue_today: revenueToday,
+                collection_rate: collectionRate,
+                by_method: byMethod
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // ==================== EXPORT CSV ====================
 
 /**
