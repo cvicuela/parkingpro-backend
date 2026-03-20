@@ -22,107 +22,257 @@
  */
 
 const net = require('net');
+const { query, transaction } = require('../config/database');
+
+// Short-lived in-memory cache for device lookups during high-frequency access events
+// TTL: 5 seconds — avoids repeated DB hits for the same device within a single request burst
+const DEVICE_CACHE_TTL_MS = 5000;
+const _deviceCache = new Map(); // serialNumber -> { device, expiresAt }
+
+function _cacheGet(serialNumber) {
+    const entry = _deviceCache.get(serialNumber);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+        _deviceCache.delete(serialNumber);
+        return null;
+    }
+    return entry.device;
+}
+
+function _cacheSet(serialNumber, device) {
+    _deviceCache.set(serialNumber, { device, expiresAt: Date.now() + DEVICE_CACHE_TTL_MS });
+}
+
+function _cacheDelete(serialNumber) {
+    _deviceCache.delete(serialNumber);
+}
 
 class ZKTecoService {
-    constructor() {
-        this.devices = new Map();
-        this.eventLog = [];
-        this.maxEventLog = 500;
-    }
 
     // ─── Device Registration ─────────────────────────
 
-    registerDevice(serialNumber, config) {
-        const device = {
-            serial_number: serialNumber,
-            name: config.name || `ZKTeco ${serialNumber}`,
-            type: config.type || 'barrier',       // barrier | lpr_camera | controller | reader
-            model: config.model || 'PB4000',
-            ip_address: config.ip_address || null,
-            port: config.port || 4370,             // Puerto por defecto ZKTeco
-            location: config.location || 'entrada_principal',  // entrada_principal | salida_principal | entrada_vip | salida_vip
-            direction: config.direction || 'entry', // entry | exit | bidirectional
-            protocol: config.protocol || 'push',    // push | tcp | wiegand
-            status: 'online',
-            connected_devices: config.connected_devices || [], // dispositivos conectados (barrera a controlador)
-            last_seen: new Date(),
-            last_event: null,
-            firmware_version: config.firmware_version || null,
-            registered_at: new Date(),
-            config: {
-                barrier_open_time: config.barrier_open_time || 5,     // segundos
-                barrier_auto_close: config.barrier_auto_close !== false,
-                lpr_sensitivity: config.lpr_sensitivity || 'high',    // low | medium | high
-                relay_number: config.relay_number || 1,               // relay 1 o 2 del controlador
-                wiegand_format: config.wiegand_format || 26,          // 26 o 34 bits
-                aux_input_enabled: config.aux_input_enabled || false,  // sensor de loop detector
-                heartbeat_interval: config.heartbeat_interval || 30,   // segundos
-                ...config.extra || {}
-            }
+    async registerDevice(serialNumber, config) {
+        const deviceConfig = {
+            barrier_open_time: config.barrier_open_time || 5,
+            barrier_auto_close: config.barrier_auto_close !== false,
+            lpr_sensitivity: config.lpr_sensitivity || 'high',
+            relay_number: config.relay_number || 1,
+            wiegand_format: config.wiegand_format || 26,
+            aux_input_enabled: config.aux_input_enabled || false,
+            heartbeat_interval: config.heartbeat_interval || 30,
+            ...config.extra || {}
         };
 
-        this.devices.set(serialNumber, device);
-        this._logEvent(serialNumber, 'device_registered', { model: device.model, type: device.type });
+        const result = await query(
+            `INSERT INTO zkteco_devices (
+                serial_number, name, type, model, ip_address, port,
+                location, direction, protocol, status, firmware_version,
+                config, connected_devices, last_seen
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'online', $10, $11, $12, NOW())
+            ON CONFLICT (serial_number) DO UPDATE SET
+                name = EXCLUDED.name,
+                type = EXCLUDED.type,
+                model = EXCLUDED.model,
+                ip_address = EXCLUDED.ip_address,
+                port = EXCLUDED.port,
+                location = EXCLUDED.location,
+                direction = EXCLUDED.direction,
+                protocol = EXCLUDED.protocol,
+                status = 'online',
+                firmware_version = EXCLUDED.firmware_version,
+                config = EXCLUDED.config,
+                connected_devices = EXCLUDED.connected_devices,
+                last_seen = NOW(),
+                updated_at = NOW()
+            RETURNING *`,
+            [
+                serialNumber,
+                config.name || `ZKTeco ${serialNumber}`,
+                config.type || 'barrier',
+                config.model || 'PB4000',
+                config.ip_address || null,
+                config.port || 4370,
+                config.location || 'entrada_principal',
+                config.direction || 'entry',
+                config.protocol || 'push',
+                config.firmware_version || null,
+                JSON.stringify(deviceConfig),
+                JSON.stringify(config.connected_devices || [])
+            ]
+        );
+
+        const device = result.rows[0];
+        _cacheSet(serialNumber, device);
+        await this._logEvent(serialNumber, 'device_registered', { model: device.model, type: device.type });
         return device;
     }
 
-    updateDevice(serialNumber, updates) {
-        const device = this.devices.get(serialNumber);
-        if (!device) return null;
+    async updateDevice(serialNumber, updates) {
+        // Build SET clauses dynamically for only the provided fields
+        const setClauses = ['updated_at = NOW()'];
+        const params = [serialNumber];
+        let paramIdx = 2;
 
-        if (updates.name) device.name = updates.name;
-        if (updates.location) device.location = updates.location;
-        if (updates.direction) device.direction = updates.direction;
-        if (updates.ip_address) device.ip_address = updates.ip_address;
-        if (updates.port) device.port = updates.port;
-        if (updates.connected_devices) device.connected_devices = updates.connected_devices;
-        if (updates.config) {
-            device.config = { ...device.config, ...updates.config };
+        if (updates.name !== undefined) {
+            setClauses.push(`name = $${paramIdx++}`);
+            params.push(updates.name);
+        }
+        if (updates.location !== undefined) {
+            setClauses.push(`location = $${paramIdx++}`);
+            params.push(updates.location);
+        }
+        if (updates.direction !== undefined) {
+            setClauses.push(`direction = $${paramIdx++}`);
+            params.push(updates.direction);
+        }
+        if (updates.ip_address !== undefined) {
+            setClauses.push(`ip_address = $${paramIdx++}`);
+            params.push(updates.ip_address);
+        }
+        if (updates.port !== undefined) {
+            setClauses.push(`port = $${paramIdx++}`);
+            params.push(updates.port);
+        }
+        if (updates.connected_devices !== undefined) {
+            setClauses.push(`connected_devices = $${paramIdx++}`);
+            params.push(JSON.stringify(updates.connected_devices));
+        }
+        if (updates.config !== undefined) {
+            // Merge existing config with the provided partial config
+            setClauses.push(`config = config || $${paramIdx++}::jsonb`);
+            params.push(JSON.stringify(updates.config));
         }
 
+        const result = await query(
+            `UPDATE zkteco_devices SET ${setClauses.join(', ')}
+             WHERE serial_number = $1
+             RETURNING *`,
+            params
+        );
+
+        if (result.rows.length === 0) return null;
+
+        const device = result.rows[0];
+        _cacheSet(serialNumber, device);
         return device;
     }
 
-    removeDevice(serialNumber) {
-        return this.devices.delete(serialNumber);
+    async removeDevice(serialNumber) {
+        const result = await query(
+            'DELETE FROM zkteco_devices WHERE serial_number = $1 RETURNING serial_number',
+            [serialNumber]
+        );
+        _cacheDelete(serialNumber);
+        return result.rows.length > 0;
     }
 
     // ─── Heartbeat ───────────────────────────────────
 
-    heartbeat(serialNumber, info = {}) {
-        const device = this.devices.get(serialNumber);
-        if (!device) return null;
+    async heartbeat(serialNumber, info = {}) {
+        const setClauses = ['last_seen = NOW()', "status = 'online'", 'updated_at = NOW()'];
+        const params = [serialNumber];
+        let paramIdx = 2;
 
-        device.last_seen = new Date();
-        device.status = 'online';
-        if (info.firmware_version) device.firmware_version = info.firmware_version;
+        if (info.firmware_version) {
+            setClauses.push(`firmware_version = $${paramIdx++}`);
+            params.push(info.firmware_version);
+        }
 
+        const result = await query(
+            `UPDATE zkteco_devices SET ${setClauses.join(', ')}
+             WHERE serial_number = $1
+             RETURNING *`,
+            params
+        );
+
+        if (result.rows.length === 0) return null;
+
+        const device = result.rows[0];
+        _cacheSet(serialNumber, device);
         return device;
     }
 
     // ─── Device Queries ──────────────────────────────
 
-    getDevices(filters = {}) {
-        const devices = [];
-        this.devices.forEach((device) => {
-            // Auto-mark offline if no heartbeat in configured interval * 3
-            const timeout = (device.config.heartbeat_interval || 30) * 3 * 1000;
-            if (Date.now() - device.last_seen.getTime() > timeout) {
-                device.status = 'offline';
-            }
+    async getDevices(filters = {}) {
+        const conditions = [];
+        const params = [];
+        let paramIdx = 1;
 
-            if (filters.type && device.type !== filters.type) return;
-            if (filters.location && device.location !== filters.location) return;
-            if (filters.status && device.status !== filters.status) return;
-            if (filters.direction && device.direction !== filters.direction) return;
+        // Auto-mark offline if no heartbeat in configured interval * 3.
+        // Uses the stored heartbeat_interval from config JSONB field.
+        // Devices without a last_seen are also considered offline.
+        conditions.push(`(
+            last_seen IS NULL
+            OR last_seen < NOW() - (
+                COALESCE((config->>'heartbeat_interval')::int, 30) * 3
+            ) * INTERVAL '1 second'
+            OR status = 'offline'
+        ) AND status != 'maintenance'`);
 
-            devices.push(device);
-        });
-        return devices;
+        // Apply the offline update as a side effect — but to keep getDevices read-like,
+        // we run the UPDATE separately and then SELECT with filters.
+        // (The SELECT below already reflects current DB truth after the UPDATE.)
+        await query(`
+            UPDATE zkteco_devices
+            SET status = 'offline', updated_at = NOW()
+            WHERE status = 'online'
+              AND (
+                last_seen IS NULL
+                OR last_seen < NOW() - (
+                    COALESCE((config->>'heartbeat_interval')::int, 30) * 3
+                ) * INTERVAL '1 second'
+              )
+        `);
+
+        // Now SELECT with caller-supplied filters
+        const filterConditions = [];
+        const filterParams = [];
+        let fidx = 1;
+
+        if (filters.type) {
+            filterConditions.push(`type = $${fidx++}`);
+            filterParams.push(filters.type);
+        }
+        if (filters.location) {
+            filterConditions.push(`location = $${fidx++}`);
+            filterParams.push(filters.location);
+        }
+        if (filters.status) {
+            filterConditions.push(`status = $${fidx++}`);
+            filterParams.push(filters.status);
+        }
+        if (filters.direction) {
+            filterConditions.push(`direction = $${fidx++}`);
+            filterParams.push(filters.direction);
+        }
+
+        const whereClause = filterConditions.length > 0
+            ? `WHERE ${filterConditions.join(' AND ')}`
+            : '';
+
+        const result = await query(
+            `SELECT * FROM zkteco_devices ${whereClause} ORDER BY created_at ASC`,
+            filterParams
+        );
+
+        return result.rows;
     }
 
-    getDevice(serialNumber) {
-        return this.devices.get(serialNumber) || null;
+    async getDevice(serialNumber) {
+        const cached = _cacheGet(serialNumber);
+        if (cached) return cached;
+
+        const result = await query(
+            'SELECT * FROM zkteco_devices WHERE serial_number = $1',
+            [serialNumber]
+        );
+
+        if (result.rows.length === 0) return null;
+
+        const device = result.rows[0];
+        _cacheSet(serialNumber, device);
+        return device;
     }
 
     // ─── Barrier Commands ────────────────────────────
@@ -131,8 +281,8 @@ class ZKTecoService {
      * Generar comando para abrir barrera ZKTeco
      * Compatible con controladores C3-x00 e inBio
      */
-    generateOpenCommand(serialNumber) {
-        const device = this.devices.get(serialNumber);
+    async generateOpenCommand(serialNumber) {
+        const device = await this.getDevice(serialNumber);
         if (!device) return null;
 
         return {
@@ -147,8 +297,8 @@ class ZKTecoService {
     /**
      * Generar comando para cerrar barrera
      */
-    generateCloseCommand(serialNumber) {
-        const device = this.devices.get(serialNumber);
+    async generateCloseCommand(serialNumber) {
+        const device = await this.getDevice(serialNumber);
         if (!device) return null;
 
         return {
@@ -205,16 +355,33 @@ class ZKTecoService {
      */
     generateExitResponse(validationResult, device) {
         if (validationResult?.allowed) {
-            const hasPayment = validationResult.payment && !validationResult.payment.is_free;
+            const hasUnpaidFee = validationResult.payment &&
+                !validationResult.payment.is_free &&
+                !validationResult.payment.paid;
+
+            // Payment is pending — hold the barrier until payment is confirmed
+            if (hasUnpaidFee) {
+                return {
+                    granted: false,
+                    relay_action: 'none',
+                    display_message: 'PAGO PENDIENTE',
+                    sub_message: `RD$ ${validationResult.payment.amount?.toFixed(2)}`,
+                    led: 'yellow',
+                    buzzer: 0,
+                    payment_required: {
+                        amount: validationResult.payment.amount
+                    }
+                };
+            }
+
+            // Free exit (grace period) or payment already confirmed
             return {
                 granted: true,
                 relay_action: 'trigger',
                 relay_number: device?.config?.relay_number || 1,
                 relay_duration: device?.config?.barrier_open_time || 5,
-                display_message: hasPayment
-                    ? `RD$ ${validationResult.payment.amount?.toFixed(2)}`
-                    : 'HASTA PRONTO',
-                sub_message: hasPayment ? 'PAGO REQUERIDO' : 'Salida autorizada',
+                display_message: 'HASTA PRONTO',
+                sub_message: 'Salida autorizada',
                 led: 'green',
                 buzzer: 1
             };
@@ -235,7 +402,7 @@ class ZKTecoService {
      * Usado para control remoto de barreras desde el dashboard
      */
     async sendTCPCommand(serialNumber, command) {
-        const device = this.devices.get(serialNumber);
+        const device = await this.getDevice(serialNumber);
         if (!device || !device.ip_address) {
             throw new Error('Dispositivo no encontrado o sin IP configurada');
         }
@@ -297,19 +464,28 @@ class ZKTecoService {
      * Procesar evento de camara LPR ZKTeco
      * Las camaras LPR envian un POST con la placa detectada
      */
-    processLPREvent(serialNumber, eventData) {
-        const device = this.devices.get(serialNumber);
-        if (device) {
-            device.last_seen = new Date();
-            device.last_event = {
-                type: 'lpr_read',
-                plate: eventData.plate,
-                confidence: eventData.confidence,
-                timestamp: new Date()
-            };
-        }
+    async processLPREvent(serialNumber, eventData) {
+        const lastEvent = {
+            type: 'lpr_read',
+            plate: eventData.plate,
+            confidence: eventData.confidence,
+            timestamp: new Date()
+        };
 
-        this._logEvent(serialNumber, 'lpr_plate_detected', {
+        // Update device last_seen and last_event; fetch fresh row for direction/location
+        const result = await query(
+            `UPDATE zkteco_devices
+             SET last_seen = NOW(), last_event = $2, updated_at = NOW()
+             WHERE serial_number = $1
+             RETURNING direction, location`,
+            [serialNumber, JSON.stringify(lastEvent)]
+        );
+
+        _cacheDelete(serialNumber); // Invalidate cache after mutation
+
+        const deviceRow = result.rows[0] || {};
+
+        await this._logEvent(serialNumber, 'lpr_plate_detected', {
             plate: eventData.plate,
             confidence: eventData.confidence,
             image_url: eventData.image_url || null
@@ -318,55 +494,85 @@ class ZKTecoService {
         return {
             plate: eventData.plate?.toUpperCase()?.trim(),
             confidence: eventData.confidence || 0,
-            direction: device?.direction || 'entry',
-            device_location: device?.location || 'unknown'
+            direction: deviceRow.direction || 'entry',
+            device_location: deviceRow.location || 'unknown'
         };
     }
 
     // ─── Event Logging ───────────────────────────────
 
-    _logEvent(serialNumber, eventType, data = {}) {
-        this.eventLog.unshift({
-            serial_number: serialNumber,
-            event_type: eventType,
-            data,
-            timestamp: new Date()
-        });
-
-        if (this.eventLog.length > this.maxEventLog) {
-            this.eventLog = this.eventLog.slice(0, this.maxEventLog);
-        }
+    async _logEvent(serialNumber, eventType, data = {}) {
+        await query(
+            `INSERT INTO zkteco_device_events (serial_number, event_type, data)
+             VALUES ($1, $2, $3)`,
+            [serialNumber, eventType, JSON.stringify(data)]
+        );
     }
 
-    getEventLog(filters = {}) {
-        let events = this.eventLog;
+    async getEventLog(filters = {}) {
+        const conditions = [];
+        const params = [];
+        let paramIdx = 1;
 
         if (filters.serial_number) {
-            events = events.filter(e => e.serial_number === filters.serial_number);
+            conditions.push(`serial_number = $${paramIdx++}`);
+            params.push(filters.serial_number);
         }
         if (filters.event_type) {
-            events = events.filter(e => e.event_type === filters.event_type);
+            conditions.push(`event_type = $${paramIdx++}`);
+            params.push(filters.event_type);
         }
 
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
         const limit = filters.limit || 50;
-        return events.slice(0, limit);
+        params.push(limit);
+
+        const result = await query(
+            `SELECT * FROM zkteco_device_events
+             ${whereClause}
+             ORDER BY created_at DESC
+             LIMIT $${paramIdx}`,
+            params
+        );
+
+        return result.rows;
     }
 
     // ─── System Stats ────────────────────────────────
 
-    getStats() {
-        const devices = this.getDevices();
+    async getStats() {
+        const [devicesResult, recentEventsResult] = await Promise.all([
+            query(`
+                SELECT
+                    COUNT(*)::int                                               AS total_devices,
+                    COUNT(*) FILTER (WHERE status = 'online')::int             AS online,
+                    COUNT(*) FILTER (WHERE status = 'offline')::int            AS offline,
+                    COUNT(*) FILTER (WHERE type = 'barrier')::int              AS barriers,
+                    COUNT(*) FILTER (WHERE type = 'lpr_camera')::int           AS lpr_cameras,
+                    COUNT(*) FILTER (WHERE type = 'controller')::int           AS controllers,
+                    COUNT(*) FILTER (WHERE type = 'reader')::int               AS readers
+                FROM zkteco_devices
+            `),
+            query(`
+                SELECT * FROM zkteco_device_events
+                ORDER BY created_at DESC
+                LIMIT 10
+            `)
+        ]);
+
+        const counts = devicesResult.rows[0] || {};
+
         return {
-            total_devices: devices.length,
-            online: devices.filter(d => d.status === 'online').length,
-            offline: devices.filter(d => d.status === 'offline').length,
+            total_devices: counts.total_devices || 0,
+            online: counts.online || 0,
+            offline: counts.offline || 0,
             by_type: {
-                barriers: devices.filter(d => d.type === 'barrier').length,
-                lpr_cameras: devices.filter(d => d.type === 'lpr_camera').length,
-                controllers: devices.filter(d => d.type === 'controller').length,
-                readers: devices.filter(d => d.type === 'reader').length,
+                barriers: counts.barriers || 0,
+                lpr_cameras: counts.lpr_cameras || 0,
+                controllers: counts.controllers || 0,
+                readers: counts.readers || 0,
             },
-            recent_events: this.eventLog.slice(0, 10)
+            recent_events: recentEventsResult.rows
         };
     }
 }

@@ -4,7 +4,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
@@ -31,6 +30,10 @@ const expenseRoutes = require('./routes/expense.routes');
 const incidentRoutes = require('./routes/incident.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const terminalRoutes = require('./routes/terminal.routes');
+
+// Middleware de seguridad
+const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter } = require('./middleware/rateLimiter');
+const sanitizer = require('./middleware/sanitizer');
 
 // Middleware de error
 const errorHandler = require('./middleware/errorHandler');
@@ -104,31 +107,14 @@ app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Sanitización de inputs (body, query, params)
+app.use(sanitizer);
+
 // Servir frontend estático (build de React)
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Rate limiting general
-const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minuto
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: {
-        error: 'Demasiadas solicitudes, por favor intenta de nuevo mas tarde'
-    },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
-app.use('/api/', limiter);
-
-// Rate limiting estricto para auth
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5,
-    skipSuccessfulRequests: true,
-    message: {
-        error: 'Demasiados intentos de autenticacion, intenta en 15 minutos'
-    }
-});
+// Rate limiting general (200 req / 15 min)
+app.use('/api/', apiLimiter);
 
 // ==================== HEALTH CHECK ====================
 
@@ -148,7 +134,7 @@ app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/vehicles', vehicleRoutes);
 app.use('/api/v1/plans', planRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
-app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/payments', paymentLimiter, paymentRoutes);
 app.use('/api/v1/access', accessRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingRoutes);
@@ -159,7 +145,7 @@ app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/rfid', rfidRoutes);
 app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/zkteco', zktecoRoutes);
+app.use('/api/v1/zkteco', deviceLimiter, zktecoRoutes);
 app.use('/api/v1/expenses', expenseRoutes);
 app.use('/api/v1/incidents', incidentRoutes);
 app.use('/api/v1/notifications', notificationRoutes);

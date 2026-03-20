@@ -30,67 +30,87 @@ const authenticateDevice = (req, res, next) => {
  * @route   GET /api/v1/zkteco/devices
  * @desc    Listar todos los dispositivos registrados
  */
-router.get('/devices', authenticate, (req, res) => {
-    const { type, location, status, direction } = req.query;
-    const devices = zktecoService.getDevices({ type, location, status, direction });
-    res.json({ success: true, data: devices });
+router.get('/devices', authenticate, async (req, res, next) => {
+    try {
+        const { type, location, status, direction } = req.query;
+        const devices = await zktecoService.getDevices({ type, location, status, direction });
+        res.json({ success: true, data: devices });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   GET /api/v1/zkteco/devices/:serial
  * @desc    Obtener un dispositivo por numero de serie
  */
-router.get('/devices/:serial', authenticate, (req, res) => {
-    const device = zktecoService.getDevice(req.params.serial);
-    if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
-    res.json({ success: true, data: device });
+router.get('/devices/:serial', authenticate, async (req, res, next) => {
+    try {
+        const device = await zktecoService.getDevice(req.params.serial);
+        if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+        res.json({ success: true, data: device });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   POST /api/v1/zkteco/devices
  * @desc    Registrar un nuevo dispositivo ZKTeco
  */
-router.post('/devices', authenticate, (req, res) => {
-    const { serial_number, name, type, model, ip_address, port, location, direction, protocol, connected_devices, firmware_version, ...config } = req.body;
+router.post('/devices', authenticate, async (req, res, next) => {
+    try {
+        const { serial_number, name, type, model, ip_address, port, location, direction, protocol, connected_devices, firmware_version, ...config } = req.body;
 
-    if (!serial_number) {
-        return res.status(400).json({ error: 'serial_number es requerido' });
+        if (!serial_number) {
+            return res.status(400).json({ error: 'serial_number es requerido' });
+        }
+
+        const existing = await zktecoService.getDevice(serial_number);
+        if (existing) {
+            return res.status(409).json({ error: 'Dispositivo ya registrado con ese numero de serie' });
+        }
+
+        const device = await zktecoService.registerDevice(serial_number, {
+            name, type, model, ip_address, port, location, direction, protocol,
+            connected_devices, firmware_version, extra: config
+        });
+
+        const io = req.app.get('io');
+        if (io) io.to('dashboard').emit('device_registered', { serial_number, type, model });
+
+        res.status(201).json({ success: true, data: device });
+    } catch (error) {
+        next(error);
     }
-
-    const existing = zktecoService.getDevice(serial_number);
-    if (existing) {
-        return res.status(409).json({ error: 'Dispositivo ya registrado con ese numero de serie' });
-    }
-
-    const device = zktecoService.registerDevice(serial_number, {
-        name, type, model, ip_address, port, location, direction, protocol,
-        connected_devices, firmware_version, extra: config
-    });
-
-    const io = req.app.get('io');
-    if (io) io.to('dashboard').emit('device_registered', { serial_number, type, model });
-
-    res.status(201).json({ success: true, data: device });
 });
 
 /**
  * @route   PUT /api/v1/zkteco/devices/:serial
  * @desc    Actualizar configuracion de un dispositivo
  */
-router.put('/devices/:serial', authenticate, (req, res) => {
-    const device = zktecoService.updateDevice(req.params.serial, req.body);
-    if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
-    res.json({ success: true, data: device });
+router.put('/devices/:serial', authenticate, async (req, res, next) => {
+    try {
+        const device = await zktecoService.updateDevice(req.params.serial, req.body);
+        if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+        res.json({ success: true, data: device });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   DELETE /api/v1/zkteco/devices/:serial
  * @desc    Eliminar un dispositivo
  */
-router.delete('/devices/:serial', authenticate, (req, res) => {
-    const removed = zktecoService.removeDevice(req.params.serial);
-    if (!removed) return res.status(404).json({ error: 'Dispositivo no encontrado' });
-    res.json({ success: true, message: 'Dispositivo eliminado' });
+router.delete('/devices/:serial', authenticate, async (req, res, next) => {
+    try {
+        const removed = await zktecoService.removeDevice(req.params.serial);
+        if (!removed) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+        res.json({ success: true, message: 'Dispositivo eliminado' });
+    } catch (error) {
+        next(error);
+    }
 });
 
 // ─── Device Actions (control remoto desde dashboard) ─────
@@ -101,13 +121,13 @@ router.delete('/devices/:serial', authenticate, (req, res) => {
  */
 router.post('/devices/:serial/open', authenticate, async (req, res, next) => {
     try {
-        const device = zktecoService.getDevice(req.params.serial);
+        const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
         if (device.type !== 'barrier' && device.type !== 'controller') {
             return res.status(400).json({ error: 'Este dispositivo no controla una barrera' });
         }
 
-        const command = zktecoService.generateOpenCommand(req.params.serial);
+        const command = await zktecoService.generateOpenCommand(req.params.serial);
 
         // Intentar enviar via TCP si tiene IP
         let tcpResult = null;
@@ -140,10 +160,10 @@ router.post('/devices/:serial/open', authenticate, async (req, res, next) => {
  */
 router.post('/devices/:serial/close', authenticate, async (req, res, next) => {
     try {
-        const device = zktecoService.getDevice(req.params.serial);
+        const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
 
-        const command = zktecoService.generateCloseCommand(req.params.serial);
+        const command = await zktecoService.generateCloseCommand(req.params.serial);
 
         let tcpResult = null;
         if (device.ip_address) {
@@ -169,7 +189,7 @@ router.post('/devices/:serial/close', authenticate, async (req, res, next) => {
  */
 router.post('/devices/:serial/read-card', authenticate, async (req, res, next) => {
     try {
-        const device = zktecoService.getDevice(req.params.serial);
+        const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
         if (device.type !== 'reader' && device.type !== 'controller') {
             return res.status(400).json({ error: 'Este dispositivo no es un lector RFID' });
@@ -213,33 +233,41 @@ router.post('/devices/:serial/read-card', authenticate, async (req, res, next) =
  * @route   POST /api/v1/zkteco/devices/:serial/stop-reading
  * @desc    Detener modo lectura
  */
-router.post('/devices/:serial/stop-reading', authenticate, (req, res) => {
-    const device = zktecoService.getDevice(req.params.serial);
-    if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
-    device.reading_mode = false;
-    device.reading_requested_at = null;
-    const io = req.app.get('io');
-    if (io) io.to('dashboard').emit('reader_stopped', { serial_number: req.params.serial });
-    res.json({ success: true, message: 'Modo lectura detenido' });
+router.post('/devices/:serial/stop-reading', authenticate, async (req, res, next) => {
+    try {
+        const device = await zktecoService.getDevice(req.params.serial);
+        if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+        device.reading_mode = false;
+        device.reading_requested_at = null;
+        const io = req.app.get('io');
+        if (io) io.to('dashboard').emit('reader_stopped', { serial_number: req.params.serial });
+        res.json({ success: true, message: 'Modo lectura detenido' });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   GET /api/v1/zkteco/readers
  * @desc    Listar lectores RFID disponibles (readers + controllers)
  */
-router.get('/readers', authenticate, (req, res) => {
-    const readers = zktecoService.getDevices({ type: 'reader' });
-    const controllers = zktecoService.getDevices({ type: 'controller' });
-    const all = [...readers, ...controllers].map(d => ({
-        serial_number: d.serial_number,
-        name: d.name,
-        model: d.model,
-        location: d.location,
-        status: d.status,
-        reading_mode: d.reading_mode || false,
-        config: { wiegand_format: d.config?.wiegand_format || 26, read_mode: d.config?.read_mode || 'rfid' }
-    }));
-    res.json({ success: true, data: all });
+router.get('/readers', authenticate, async (req, res, next) => {
+    try {
+        const readers = await zktecoService.getDevices({ type: 'reader' });
+        const controllers = await zktecoService.getDevices({ type: 'controller' });
+        const all = [...readers, ...controllers].map(d => ({
+            serial_number: d.serial_number,
+            name: d.name,
+            model: d.model,
+            location: d.location,
+            status: d.status,
+            reading_mode: d.reading_mode || false,
+            config: { wiegand_format: d.config?.wiegand_format || 26, read_mode: d.config?.read_mode || 'rfid' }
+        }));
+        res.json({ success: true, data: all });
+    } catch (error) {
+        next(error);
+    }
 });
 
 // ─── Device PUSH Endpoints (llamados por los dispositivos) ──
@@ -248,77 +276,89 @@ router.get('/readers', authenticate, (req, res) => {
  * @route   POST /api/v1/zkteco/push/card-read
  * @desc    Lector RFID reporta tarjeta escaneada (modo registro/asignacion)
  */
-router.post('/push/card-read', authenticateDevice, (req, res) => {
-    const { serial_number, card_uid, format } = req.body;
+router.post('/push/card-read', authenticateDevice, async (req, res, next) => {
+    try {
+        const { serial_number, card_uid, format } = req.body;
 
-    if (!card_uid) {
-        return res.status(400).json({ error: 'card_uid es requerido' });
+        if (!card_uid) {
+            return res.status(400).json({ error: 'card_uid es requerido' });
+        }
+
+        const device = await zktecoService.getDevice(serial_number);
+        if (device) {
+            device.last_seen = new Date();
+            device.last_event = { type: 'card_read', card_uid, timestamp: new Date() };
+            // Desactivar modo lectura despues de leer
+            device.reading_mode = false;
+            device.reading_requested_at = null;
+        }
+
+        zktecoService._logEvent(serial_number, 'card_read', { card_uid, format });
+
+        // Emitir a dashboard via Socket.IO para que el modal de registro capture el UID
+        const io = req.app.get('io');
+        if (io) {
+            io.to('dashboard').emit('card_scanned', {
+                serial_number,
+                card_uid: card_uid.toUpperCase().replace(/[:\- ]/g, ''),
+                format: format || 'hex',
+                device_name: device?.name || serial_number,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        res.json({ success: true, message: 'Tarjeta recibida' });
+    } catch (error) {
+        next(error);
     }
-
-    const device = zktecoService.getDevice(serial_number);
-    if (device) {
-        device.last_seen = new Date();
-        device.last_event = { type: 'card_read', card_uid, timestamp: new Date() };
-        // Desactivar modo lectura despues de leer
-        device.reading_mode = false;
-        device.reading_requested_at = null;
-    }
-
-    zktecoService._logEvent(serial_number, 'card_read', { card_uid, format });
-
-    // Emitir a dashboard via Socket.IO para que el modal de registro capture el UID
-    const io = req.app.get('io');
-    if (io) {
-        io.to('dashboard').emit('card_scanned', {
-            serial_number,
-            card_uid: card_uid.toUpperCase().replace(/[:\- ]/g, ''),
-            format: format || 'hex',
-            device_name: device?.name || serial_number,
-            timestamp: new Date().toISOString()
-        });
-    }
-
-    res.json({ success: true, message: 'Tarjeta recibida' });
 });
 
 /**
  * @route   POST /api/v1/zkteco/push/heartbeat
  * @desc    Heartbeat del dispositivo ZKTeco
  */
-router.post('/push/heartbeat', authenticateDevice, (req, res) => {
-    const { serial_number, firmware_version } = req.body;
-    const device = zktecoService.heartbeat(serial_number, { firmware_version });
+router.post('/push/heartbeat', authenticateDevice, async (req, res, next) => {
+    try {
+        const { serial_number, firmware_version } = req.body;
+        const device = await zktecoService.heartbeat(serial_number, { firmware_version });
 
-    if (!device) {
-        return res.status(404).json({ error: 'Dispositivo no registrado' });
+        if (!device) {
+            return res.status(404).json({ error: 'Dispositivo no registrado' });
+        }
+
+        res.json({ success: true, status: 'ok', server_time: new Date().toISOString() });
+    } catch (error) {
+        next(error);
     }
-
-    res.json({ success: true, status: 'ok', server_time: new Date().toISOString() });
 });
 
 /**
  * @route   POST /api/v1/zkteco/push/register
  * @desc    Auto-registro de dispositivo ZKTeco via PUSH
  */
-router.post('/push/register', authenticateDevice, (req, res) => {
-    const { serial_number, type, model, firmware_version, ip_address, port } = req.body;
+router.post('/push/register', authenticateDevice, async (req, res, next) => {
+    try {
+        const { serial_number, type, model, firmware_version, ip_address, port } = req.body;
 
-    if (!serial_number) {
-        return res.status(400).json({ error: 'serial_number es requerido' });
+        if (!serial_number) {
+            return res.status(400).json({ error: 'serial_number es requerido' });
+        }
+
+        const existing = await zktecoService.getDevice(serial_number);
+        if (existing) {
+            // Re-register = update last_seen
+            await zktecoService.heartbeat(serial_number, { firmware_version });
+            return res.json({ success: true, data: existing, message: 'Dispositivo ya registrado' });
+        }
+
+        const device = await zktecoService.registerDevice(serial_number, {
+            type, model, firmware_version, ip_address, port
+        });
+
+        res.json({ success: true, data: device });
+    } catch (error) {
+        next(error);
     }
-
-    const existing = zktecoService.getDevice(serial_number);
-    if (existing) {
-        // Re-register = update last_seen
-        zktecoService.heartbeat(serial_number, { firmware_version });
-        return res.json({ success: true, data: existing, message: 'Dispositivo ya registrado' });
-    }
-
-    const device = zktecoService.registerDevice(serial_number, {
-        type, model, firmware_version, ip_address, port
-    });
-
-    res.json({ success: true, data: device });
 });
 
 /**
@@ -333,7 +373,7 @@ router.post('/push/lpr-event', authenticateDevice, async (req, res, next) => {
             return res.status(400).json({ error: 'plate es requerido' });
         }
 
-        const lprResult = zktecoService.processLPREvent(serial_number, {
+        const lprResult = await zktecoService.processLPREvent(serial_number, {
             plate, confidence, image_url
         });
 
@@ -348,10 +388,10 @@ router.post('/push/lpr-event', authenticateDevice, async (req, res, next) => {
             validationResult = await accessControlService.validateExit(lprResult.plate);
         }
 
-        const device = zktecoService.getDevice(serial_number);
+        const device = await zktecoService.getDevice(serial_number);
         const response = type === 'entry'
-            ? zktecoService.generateAccessResponse(validationResult, device)
-            : zktecoService.generateExitResponse(validationResult, device);
+            ? await zktecoService.generateAccessResponse(validationResult, device)
+            : await zktecoService.generateExitResponse(validationResult, device);
 
         // Registrar entrada automatica si permitida
         if (type === 'entry' && validationResult.allowed) {
@@ -427,10 +467,10 @@ router.post('/push/access-event', authenticateDevice, async (req, res, next) => 
                 type
             });
 
-            const device = zktecoService.getDevice(serial_number);
+            const device = await zktecoService.getDevice(serial_number);
             const response = type === 'entry'
-                ? zktecoService.generateAccessResponse(validationResult, device)
-                : zktecoService.generateExitResponse(validationResult, device);
+                ? await zktecoService.generateAccessResponse(validationResult, device)
+                : await zktecoService.generateExitResponse(validationResult, device);
 
             if (type === 'entry' && validationResult.allowed) {
                 const plate = validationResult.subscription?.vehicle_plate || vehicle_plate || 'ZKTECO';
@@ -460,10 +500,10 @@ router.post('/push/access-event', authenticateDevice, async (req, res, next) => 
                 validationResult = await accessControlService.validateExit(vehicle_plate);
             }
 
-            const device = zktecoService.getDevice(serial_number);
+            const device = await zktecoService.getDevice(serial_number);
             const response = type === 'entry'
-                ? zktecoService.generateAccessResponse(validationResult, device)
-                : zktecoService.generateExitResponse(validationResult, device);
+                ? await zktecoService.generateAccessResponse(validationResult, device)
+                : await zktecoService.generateExitResponse(validationResult, device);
 
             return res.json({ success: true, response, validationResult });
         }
@@ -500,37 +540,50 @@ router.post('/push/action-completed', authenticateDevice, (req, res) => {
  * @route   GET /api/v1/zkteco/stats
  * @desc    Estadisticas del sistema de dispositivos
  */
-router.get('/stats', authenticate, (req, res) => {
-    res.json({ success: true, data: zktecoService.getStats() });
+router.get('/stats', authenticate, async (req, res, next) => {
+    try {
+        const data = await zktecoService.getStats();
+        res.json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   GET /api/v1/zkteco/events
  * @desc    Log de eventos de dispositivos
  */
-router.get('/events', authenticate, (req, res) => {
-    const { serial_number, event_type, limit } = req.query;
-    const events = zktecoService.getEventLog({
-        serial_number,
-        event_type,
-        limit: limit ? parseInt(limit) : 50
-    });
-    res.json({ success: true, data: events });
+router.get('/events', authenticate, async (req, res, next) => {
+    try {
+        const { serial_number, event_type, limit } = req.query;
+        const events = await zktecoService.getEventLog({
+            serial_number,
+            event_type,
+            limit: limit ? parseInt(limit) : 50
+        });
+        res.json({ success: true, data: events });
+    } catch (error) {
+        next(error);
+    }
 });
 
 /**
  * @route   GET /api/v1/zkteco/status
  * @desc    Health check publico (para dispositivos)
  */
-router.get('/status', (req, res) => {
-    const stats = zktecoService.getStats();
-    res.json({
-        success: true,
-        server: 'online',
-        timestamp: new Date().toISOString(),
-        devices: stats.total_devices,
-        online: stats.online
-    });
+router.get('/status', async (req, res, next) => {
+    try {
+        const stats = await zktecoService.getStats();
+        res.json({
+            success: true,
+            server: 'online',
+            timestamp: new Date().toISOString(),
+            devices: stats.total_devices,
+            online: stats.online
+        });
+    } catch (error) {
+        next(error);
+    }
 });
 
 module.exports = router;

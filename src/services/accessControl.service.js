@@ -300,6 +300,7 @@ class AccessControlService {
         
         return {
             allowed: true,
+            barrier_allowed: calculation.isFree,
             accessType: 'hourly',
             session: {
                 id: session.id,
@@ -313,7 +314,8 @@ class AccessControlService {
                 breakdown: calculation.breakdown,
                 is_free: calculation.isFree
             },
-            message: calculation.isFree 
+            payment_status: calculation.isFree ? 'not_required' : 'pending',
+            message: calculation.isFree
                 ? '✅ SALIDA GRATIS (tolerancia)'
                 : `💰 Total a pagar: RD$ ${calculation.amount.toFixed(2)}`,
             nextStep: calculation.isFree ? 'end_session' : 'process_payment'
