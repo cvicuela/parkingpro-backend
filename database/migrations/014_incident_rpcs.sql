@@ -45,7 +45,7 @@ BEGIN
   INSERT INTO incidents (type, vehicle_plate, subscription_id, operator_id, title, description, severity, status, photos)
   VALUES (p_type, p_vehicle_plate, p_subscription_id, v_user_id, p_title, p_description, p_severity, 'open', p_photos)
   RETURNING id INTO v_id;
-  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
   VALUES (v_user_id, 'incident_created', 'incident', v_id,
     jsonb_build_object('type', p_type, 'severity', p_severity, 'title', p_title));
   RETURN json_build_object('success', true, 'data', json_build_object('id', v_id));
@@ -67,7 +67,7 @@ BEGIN
     resolution_notes = COALESCE(p_resolution_notes, resolution_notes),
     updated_at = NOW()
   WHERE id = p_id;
-  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
   VALUES (v_user_id, 'incident_' || p_status, 'incident', p_id,
     jsonb_build_object('status', p_status, 'notes', p_resolution_notes));
   RETURN json_build_object('success', true);
