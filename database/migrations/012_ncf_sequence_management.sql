@@ -93,7 +93,8 @@ END; $function$;
 
 -- Update NCF sequence
 CREATE OR REPLACE FUNCTION public.update_ncf_sequence(
-  p_token TEXT, p_id UUID, p_range_to BIGINT DEFAULT NULL,
+  p_token TEXT, p_id UUID, p_range_from BIGINT DEFAULT NULL,
+  p_range_to BIGINT DEFAULT NULL,
   p_alert_threshold INT DEFAULT NULL, p_is_active BOOLEAN DEFAULT NULL,
   p_authorized_date DATE DEFAULT NULL, p_expiration_date DATE DEFAULT NULL
 ) RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $function$
@@ -102,6 +103,7 @@ BEGIN
   SELECT r.user_id, r.user_role INTO v_user_id, v_role
   FROM require_role(p_token, ARRAY['admin','super_admin']) r;
   UPDATE ncf_sequences SET
+    range_from = COALESCE(p_range_from, range_from),
     range_to = COALESCE(p_range_to, range_to),
     alert_threshold = COALESCE(p_alert_threshold, alert_threshold),
     is_active = COALESCE(p_is_active, is_active),
@@ -111,7 +113,7 @@ BEGIN
   WHERE id = p_id;
   INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
   VALUES (v_user_id, 'ncf_sequence_updated', 'ncf_sequences', p_id,
-    jsonb_build_object('range_to', p_range_to, 'alert_threshold', p_alert_threshold));
+    jsonb_build_object('range_from', p_range_from, 'range_to', p_range_to, 'alert_threshold', p_alert_threshold));
   RETURN json_build_object('success', true);
 EXCEPTION WHEN OTHERS THEN
   RETURN json_build_object('success', false, 'error', SQLERRM);
