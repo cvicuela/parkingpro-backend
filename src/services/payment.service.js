@@ -13,9 +13,21 @@ class PaymentService {
         };
     }
 
-    async processPayment({ amount, taxRate, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {}, userId, req }) {
-        const taxAmount = amount * (taxRate || parseFloat(process.env.TAX_RATE) || 0.18);
-        const totalAmount = amount + taxAmount;
+    async processPayment({ amount, taxRate, priceIncludesTax = false, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {}, userId, req }) {
+        const rate = taxRate || parseFloat(process.env.TAX_RATE) || 0.18;
+        let baseAmount, taxAmount, totalAmount;
+
+        if (priceIncludesTax) {
+            // El monto ya incluye ITBIS — extraer subtotal e impuesto
+            totalAmount = amount;
+            baseAmount = Math.round((amount / (1 + rate)) * 100) / 100;
+            taxAmount = Math.round((totalAmount - baseAmount) * 100) / 100;
+        } else {
+            // Monto sin ITBIS — calcular impuesto encima
+            baseAmount = amount;
+            taxAmount = Math.round((amount * rate) * 100) / 100;
+            totalAmount = baseAmount + taxAmount;
+        }
 
         const handler = this.providers[provider];
         if (!handler) {
@@ -43,7 +55,7 @@ class PaymentService {
                 [
                     subscriptionId || null,
                     customerId || null,
-                    amount,
+                    baseAmount,
                     taxAmount,
                     totalAmount,
                     providerResult.status,
@@ -70,7 +82,7 @@ class PaymentService {
                 action: 'payment_created',
                 entityType: 'payment',
                 entityId: payment.id,
-                changes: { amount, taxAmount, totalAmount, provider, status: providerResult.status },
+                changes: { amount: baseAmount, taxAmount, totalAmount, provider, status: providerResult.status, priceIncludesTax },
                 req
             });
 

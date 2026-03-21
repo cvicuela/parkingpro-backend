@@ -85,80 +85,90 @@ INSERT INTO vehicles (id, customer_id, plate, make, model, color, year, is_prima
 -- PLANES
 -- ============================================
 
--- Plan Diurno
+-- Plan Diurno (precio con ITBIS 18% incluido: RD$2,500 + RD$450 = RD$2,950)
 INSERT INTO plans (
     id, name, type, description, base_price, weekly_price,
     start_hour, end_hour, crosses_midnight, tolerance_minutes,
-    max_capacity, daily_entry_limit, display_order
+    max_capacity, daily_entry_limit, display_order,
+    price_includes_tax, tax_rate
 ) VALUES (
     '00000000-0000-0000-0000-000000000401',
     'Diurno',
     'diurno',
     'Acceso de 6:00 AM a 6:00 PM',
-    2500.00,
-    650.00,
+    2950.00,
+    767.00,
     6,
     18,
     false,
     15,
     60,
     5,
-    1
+    1,
+    true,
+    0.1800
 );
 
--- Plan Nocturno
+-- Plan Nocturno (precio con ITBIS 18% incluido: RD$2,000 + RD$360 = RD$2,360)
 INSERT INTO plans (
     id, name, type, description, base_price, weekly_price,
     start_hour, end_hour, crosses_midnight, tolerance_minutes,
-    max_capacity, daily_entry_limit, display_order
+    max_capacity, daily_entry_limit, display_order,
+    price_includes_tax, tax_rate
 ) VALUES (
     '00000000-0000-0000-0000-000000000402',
     'Nocturno',
     'nocturno',
     'Acceso de 6:00 PM a 6:00 AM',
-    2000.00,
-    520.00,
+    2360.00,
+    613.60,
     18,
     6,
     true,
     15,
     70,
     5,
-    2
+    2,
+    true,
+    0.1800
 );
 
--- Plan 24 Horas
+-- Plan 24 Horas (precio con ITBIS 18% incluido: RD$3,500 + RD$630 = RD$4,130)
 INSERT INTO plans (
     id, name, type, description, base_price, weekly_price,
     start_hour, end_hour, crosses_midnight, tolerance_minutes,
-    max_capacity, daily_entry_limit, display_order
+    max_capacity, daily_entry_limit, display_order,
+    price_includes_tax, tax_rate
 ) VALUES (
     '00000000-0000-0000-0000-000000000403',
     '24 Horas',
     '24h',
     'Acceso ilimitado 24/7',
-    3500.00,
-    910.00,
+    4130.00,
+    1073.80,
     NULL,
     NULL,
     false,
     15,
     60,
     10,
-    3
+    3,
+    true,
+    0.1800
 );
 
--- Plan Por Hora
+-- Plan Por Hora (precios con ITBIS 18% incluido)
 INSERT INTO plans (
     id, name, type, description, base_price, weekly_price,
     start_hour, end_hour, crosses_midnight, tolerance_minutes,
-    max_capacity, daily_entry_limit, display_order
+    max_capacity, daily_entry_limit, display_order,
+    price_includes_tax, tax_rate
 ) VALUES (
     '00000000-0000-0000-0000-000000000404',
     'Por Hora',
     'hourly',
-    'Pago por hora de uso (1ra hora: RD$50, 2da: RD$70, 3ra+: RD$100)',
-    50.00,
+    'Pago por hora de uso (1ra hora: RD$59, 2da: RD$82.60, 3ra+: RD$118) - ITBIS incluido',
+    59.00,
     NULL,
     NULL,
     NULL,
@@ -166,17 +176,20 @@ INSERT INTO plans (
     5,
     40,
     999,
-    4
+    4,
+    true,
+    0.1800
 );
 
 -- ============================================
 -- TARIFAS POR HORA
 -- ============================================
 
+-- Tarifas por hora (precios con ITBIS 18% incluido)
 INSERT INTO hourly_rates (plan_id, hour_number, rate, description) VALUES
-('00000000-0000-0000-0000-000000000404', 1, 50.00, 'Primera hora'),
-('00000000-0000-0000-0000-000000000404', 2, 70.00, 'Segunda hora'),
-('00000000-0000-0000-0000-000000000404', 3, 100.00, 'Tercera hora en adelante');
+('00000000-0000-0000-0000-000000000404', 1, 59.00, 'Primera hora (ITBIS incl.)'),
+('00000000-0000-0000-0000-000000000404', 2, 82.60, 'Segunda hora (ITBIS incl.)'),
+('00000000-0000-0000-0000-000000000404', 3, 118.00, 'Tercera hora en adelante (ITBIS incl.)');
 
 -- ============================================
 -- SUSCRIPCIONES (fechas relativas al momento de seed)
@@ -420,7 +433,8 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('cash.alert_email', '"alonsoveloz@gmail.com"', 'Email para alertas de caja', 'cash'),
 
 ('invoice.business_name', '"ParkingPro"', 'Nombre del negocio en facturas', 'invoice'),
-('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice')
+('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice'),
+('company_rnc', '""', 'RNC para Reportes Fiscales DGII (606/607) - se sincroniza con business_rnc', 'facturacion')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================

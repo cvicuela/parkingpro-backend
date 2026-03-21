@@ -35,13 +35,16 @@ class HourlyRateService {
             throw new Error('No hay tarifas configuradas para este plan');
         }
         
-        // Obtener tolerancia de minutos
+        // Obtener tolerancia de minutos y configuración fiscal
         const toleranceResult = await query(
-            `SELECT tolerance_minutes FROM plans WHERE id = $1`,
+            `SELECT tolerance_minutes, price_includes_tax, tax_rate FROM plans WHERE id = $1`,
             [planId]
         );
         
-        const toleranceMinutes = toleranceResult.rows[0]?.tolerance_minutes || 5;
+        const planConfig = toleranceResult.rows[0] || {};
+        const toleranceMinutes = planConfig.tolerance_minutes || 5;
+        const priceIncludesTax = planConfig.price_includes_tax !== false;
+        const taxRate = parseFloat(planConfig.tax_rate) || 0.18;
         
         // Calcular minutos totales
         let totalMinutes = differenceInMinutes(exitTime, entryTime);
@@ -90,8 +93,23 @@ class HourlyRateService {
             });
         }
         
+        // Calcular desglose fiscal
+        let subtotal, taxAmount;
+        if (priceIncludesTax) {
+            subtotal = Math.round((totalAmount / (1 + taxRate)) * 100) / 100;
+            taxAmount = Math.round((totalAmount - subtotal) * 100) / 100;
+        } else {
+            subtotal = totalAmount;
+            taxAmount = Math.round((totalAmount * taxRate) * 100) / 100;
+            totalAmount = subtotal + taxAmount;
+        }
+
         return {
             amount: totalAmount,
+            subtotal,
+            taxAmount,
+            taxRate,
+            priceIncludesTax,
             breakdown,
             totalMinutes,
             totalHours,

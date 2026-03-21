@@ -5,6 +5,43 @@ const { query } = require('../config/database');
 const hourlyRateService = require('../services/hourlyRate.service');
 
 /**
+ * Helper: calcular desglose ITBIS para un plan
+ */
+function addTaxBreakdown(plan) {
+    const price = parseFloat(plan.base_price);
+    const taxRate = parseFloat(plan.tax_rate) || 0.18;
+    const includesTax = plan.price_includes_tax !== false;
+
+    if (includesTax) {
+        const subtotal = Math.round((price / (1 + taxRate)) * 100) / 100;
+        const taxAmount = Math.round((price - subtotal) * 100) / 100;
+        return {
+            ...plan,
+            tax_breakdown: {
+                price_includes_tax: true,
+                subtotal,
+                tax_amount: taxAmount,
+                tax_rate: taxRate,
+                tax_rate_percent: Math.round(taxRate * 100),
+                total: price
+            }
+        };
+    }
+    const taxAmount = Math.round((price * taxRate) * 100) / 100;
+    return {
+        ...plan,
+        tax_breakdown: {
+            price_includes_tax: false,
+            subtotal: price,
+            tax_amount: taxAmount,
+            tax_rate: taxRate,
+            tax_rate_percent: Math.round(taxRate * 100),
+            total: Math.round((price + taxAmount) * 100) / 100
+        }
+    };
+}
+
+/**
  * @route   GET /api/v1/plans
  * @desc    Obtener todos los planes activos
  * @access  Public
@@ -17,13 +54,14 @@ router.get('/', async (req, res, next) => {
              ORDER BY display_order ASC`
         );
         
-        // Obtener tarifas por hora para planes hourly
+        // Obtener tarifas por hora para planes hourly + agregar desglose ITBIS
         const plans = await Promise.all(result.rows.map(async (plan) => {
+            let enriched = addTaxBreakdown(plan);
             if (plan.type === 'hourly') {
                 const rates = await hourlyRateService.getHourlyRates(plan.id);
-                return { ...plan, hourly_rates: rates };
+                enriched = { ...enriched, hourly_rates: rates };
             }
-            return plan;
+            return enriched;
         }));
         
         res.json({
@@ -56,14 +94,14 @@ router.get('/:id', async (req, res, next) => {
             });
         }
         
-        let plan = result.rows[0];
-        
+        let plan = addTaxBreakdown(result.rows[0]);
+
         // Si es plan hourly, obtener tarifas
         if (plan.type === 'hourly') {
             const rates = await hourlyRateService.getHourlyRates(plan.id);
             plan = { ...plan, hourly_rates: rates };
         }
-        
+
         res.json({
             success: true,
             data: plan
@@ -103,18 +141,19 @@ router.post('/', authenticate, authorize(['admin', 'super_admin']), async (req, 
             });
         }
         
-        // Insertar plan
+        // Insertar plan (precio incluye ITBIS por defecto)
         const result = await query(
             `INSERT INTO plans (
                 name, type, description, base_price, weekly_price,
                 start_hour, end_hour, crosses_midnight, tolerance_minutes,
-                max_capacity, daily_entry_limit
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                max_capacity, daily_entry_limit, price_includes_tax, tax_rate
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *`,
             [
                 name, type, description, basePrice, weeklyPrice,
                 startHour, endHour, crossesMidnight, toleranceMinutes || 15,
-                maxCapacity, dailyEntryLimit || 5
+                maxCapacity, dailyEntryLimit || 5,
+                true, 0.18
             ]
         );
         
@@ -156,7 +195,7 @@ router.patch('/:id', authenticate, authorize(['admin', 'super_admin']), async (r
             'name', 'description', 'base_price', 'weekly_price',
             'start_hour', 'end_hour', 'crosses_midnight', 'tolerance_minutes',
             'max_capacity', 'daily_entry_limit', 'overage_hourly_rate',
-            'additional_vehicle_monthly', 'is_active'
+            'additional_vehicle_monthly', 'is_active', 'price_includes_tax', 'tax_rate'
         ];
         
         for (const [key, value] of Object.entries(updates)) {

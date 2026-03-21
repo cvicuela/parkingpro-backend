@@ -11,6 +11,7 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('currency', 'DOP', 'Moneda del sistema', 'general'),
 ('business_name', 'ParkingPro', 'Nombre del negocio para facturas', 'general'),
 ('business_rnc', '', 'RNC del negocio (completar en producción)', 'general'),
+('company_rnc', '', 'RNC para Reportes Fiscales DGII (606/607)', 'facturacion'),
 ('business_address', '', 'Dirección del negocio para facturas', 'general'),
 ('business_phone', '', 'Teléfono del negocio', 'general'),
 ('multi_register_enabled', 'false', 'Permitir múltiples cajas registradoras simultáneas', 'caja')
