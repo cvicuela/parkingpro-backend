@@ -1,12 +1,21 @@
 /**
- * Arduino Hardware Integration Service
+ * Arduino/ESP32 Hardware Integration Service
  *
- * Soporta comunicacion con dispositivos Arduino para control de acceso fisico.
+ * Soporta comunicacion con dispositivos Arduino/ESP32 para control de acceso fisico.
  *
- * Hardware recomendado (arduino.cc):
- *   - Arduino UNO R4 WiFi (ABX00087) - Controlador principal con WiFi integrado
- *   - Arduino MKR WiFi 1010 (ABX00023) - Alternativa compacta con WiFi
- *   - Servo Motor (para barrera fisica)
+ * Controladores recomendados (por orden de preferencia):
+ *   - ESP32 WT32-ETH01 (Ethernet nativo, recomendado para produccion)
+ *   - ESP32 + modulo W5500 SPI (Ethernet via SPI)
+ *   - Arduino UNO R4 WiFi + Shield Ethernet W5500 (alternativa Arduino)
+ *   - ESP32 DevKit V1 (WiFi, solo para desarrollo/pruebas)
+ *
+ * Conectividad:
+ *   - PREFERIDO: Ethernet cableado (latencia ~1-5ms, 100% confiable)
+ *   - ALTERNATIVA: WiFi (latencia ~50-200ms, sujeto a interferencia)
+ *   - El backend es agnostico al transporte: recibe HTTP igual en ambos casos
+ *
+ * Perifericos:
+ *   - Modulo Relay (1 o 2 canales) - Contacto seco para activar la barrera
  *   - Sensor ultrasonico HC-SR04 (deteccion de vehiculo)
  *   - LCD 16x2 con I2C (pantalla de estado)
  *   - LED RGB (indicador visual rojo/verde)
@@ -15,10 +24,17 @@
  *
  * Flujo de operacion:
  *   1. Sensor ultrasonico detecta vehiculo en la entrada
- *   2. Arduino envia POST /api/v1/arduino/vehicle-detected a ParkingPro
- *   3. Backend responde con instrucciones (abrir barrera, mostrar mensaje, etc.)
- *   4. Arduino ejecuta las instrucciones (servo, LCD, LED, buzzer)
- *   5. Arduino confirma accion completada via POST /api/v1/arduino/action-completed
+ *   2. Controlador envia POST /api/v1/arduino/vehicle-detected a ParkingPro
+ *   3. Backend responde con instrucciones (activar relay/barrera, mostrar mensaje, etc.)
+ *   4. Controlador ejecuta las instrucciones (relay, LCD, LED, buzzer)
+ *   5. Controlador confirma accion completada via POST /api/v1/arduino/action-completed
+ *
+ * Nota sobre la barrera:
+ *   La barrera se controla via relay con CONTACTO SECO (dry contact).
+ *   El relay cierra el circuito entre los terminales OPEN y COM de la barrera
+ *   por el tiempo indicado en relay_duration_ms. No pasa voltaje del controlador
+ *   a la barrera — el relay aisla electricamente ambos lados.
+ *   Al desactivar el relay, la barrera cierra por gravedad o resorte.
  */
 
 class ArduinoService {
@@ -37,7 +53,7 @@ class ArduinoService {
             lastSeen: new Date(),
             status: 'online',
             firmware: config.firmware || '1.0.0',
-            capabilities: config.capabilities || ['barrier', 'lcd', 'led', 'buzzer']
+            capabilities: config.capabilities || ['relay', 'lcd', 'led', 'buzzer']
         });
 
         return this.registeredDevices.get(deviceId);
@@ -63,6 +79,7 @@ class ArduinoService {
         if (!validationResult) {
             return {
                 action: 'deny',
+                relay: 'off',
                 barrier: 'closed',
                 led: 'red',
                 buzzer: 'error',
@@ -74,6 +91,8 @@ class ArduinoService {
         if (validationResult.allowed) {
             return {
                 action: 'allow',
+                relay: 'on',
+                relay_duration_ms: 5000,
                 barrier: 'open',
                 barrier_delay_ms: 5000,
                 led: 'green',
@@ -89,6 +108,7 @@ class ArduinoService {
 
         return {
             action: 'deny',
+            relay: 'off',
             barrier: 'closed',
             led: 'red',
             buzzer: 'error',
@@ -105,6 +125,8 @@ class ArduinoService {
             const hasPayment = validationResult.payment && !validationResult.payment.is_free;
             return {
                 action: 'allow',
+                relay: 'on',
+                relay_duration_ms: 5000,
                 barrier: 'open',
                 barrier_delay_ms: 5000,
                 led: 'green',
@@ -118,6 +140,7 @@ class ArduinoService {
 
         return {
             action: 'deny',
+            relay: 'off',
             barrier: 'closed',
             led: 'red',
             buzzer: 'error',

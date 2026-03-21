@@ -31,6 +31,7 @@ const incidentRoutes = require('./routes/incident.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const terminalRoutes = require('./routes/terminal.routes');
 const dgiiRoutes = require('./routes/dgii.routes');
+const setupRoutes = require('./routes/setup.routes');
 
 // Middleware de seguridad
 const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter, sensitiveOpsLimiter, reportLimiter } = require('./middleware/rateLimiter');
@@ -166,6 +167,7 @@ app.use('/api/v1/incidents', incidentRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/terminals', terminalRoutes);
 app.use('/api/v1/dgii', dgiiRoutes);
+app.use('/api/v1/setup', setupRoutes);
 
 // ==================== SPA FALLBACK ====================
 
