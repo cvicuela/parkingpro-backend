@@ -165,7 +165,7 @@ BEGIN
       COALESCE(c.first_name || ' ' || c.last_name, 'Visitante') AS customer_name,
       EXTRACT(EPOCH FROM (NOW() - ps.entry_time)) / 60 AS minutes_elapsed,
       -- Calcular monto actual basado en horas transcurridas
-      COALESCE(ps.calculated_amount,
+      COALESCE(NULLIF(ps.calculated_amount, 0),
         (SELECT COALESCE(SUM(
           COALESCE(
             (SELECT rate FROM hourly_rates WHERE plan_id = ps.plan_id AND hour_number = h.n AND is_active = true),
