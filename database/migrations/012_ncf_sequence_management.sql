@@ -62,7 +62,7 @@ BEGIN
   END IF;
   v_ncf := get_next_ncf(p_ncf_type);
   UPDATE invoices SET ncf = v_ncf WHERE id = p_invoice_id;
-  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
   VALUES (v_user_id, 'ncf_assigned', 'invoice', p_invoice_id,
     jsonb_build_object('ncf', v_ncf, 'ncf_type', p_ncf_type));
   RETURN json_build_object('success', true, 'data', json_build_object('ncf', v_ncf, 'invoice_id', p_invoice_id));
@@ -111,7 +111,7 @@ BEGIN
     expiration_date = COALESCE(p_expiration_date, expiration_date),
     updated_at = NOW()
   WHERE id = p_id;
-  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
   VALUES (v_user_id, 'ncf_sequence_updated', 'ncf_sequences', p_id,
     jsonb_build_object('range_from', p_range_from, 'range_to', p_range_to, 'alert_threshold', p_alert_threshold));
   RETURN json_build_object('success', true);

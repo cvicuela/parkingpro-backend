@@ -76,7 +76,7 @@ BEGIN
   VALUES (COALESCE(v_target_user_id, v_user_id), p_type, p_channel, p_recipient,
     p_subject, p_body, p_template_id, p_template_data, 'pending')
   RETURNING id INTO v_notif_id;
-  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)
+  INSERT INTO audit_logs (user_id, action, entity_type, entity_id, changes)
   VALUES (v_user_id, 'notification_queued', 'notification', v_notif_id,
     jsonb_build_object('channel', p_channel, 'recipient', p_recipient, 'type', p_type));
   RETURN json_build_object('success', true, 'data', json_build_object('id', v_notif_id));
