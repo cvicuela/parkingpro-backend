@@ -1,17 +1,23 @@
 const webPush = require('web-push');
 const { query } = require('../config/database');
 
-// Configure VAPID keys from env
-const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
+// Configure VAPID keys from env, or auto-generate if not set
+let VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
+let VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
 const VAPID_EMAIL = process.env.VAPID_EMAIL || 'mailto:admin@parkingpro.do';
 
-if (VAPID_PUBLIC && VAPID_PRIVATE) {
-  webPush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC, VAPID_PRIVATE);
-  console.log('[PushService] VAPID keys configured');
-} else {
-  console.warn('[PushService] VAPID keys not configured - push notifications disabled');
+if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
+  // Auto-generate VAPID keys for development/first-run
+  const generated = webPush.generateVAPIDKeys();
+  VAPID_PUBLIC = generated.publicKey;
+  VAPID_PRIVATE = generated.privateKey;
+  console.log('[PushService] VAPID keys auto-generated (set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY env vars for production)');
+  console.log('[PushService] VAPID_PUBLIC_KEY=' + VAPID_PUBLIC);
+  console.log('[PushService] VAPID_PRIVATE_KEY=' + VAPID_PRIVATE);
 }
+
+webPush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC, VAPID_PRIVATE);
+console.log('[PushService] VAPID keys configured');
 
 /**
  * Save a push subscription for a user

@@ -18,6 +18,7 @@ const settingRoutes = require('../src/routes/setting.routes');
 const cashRegisterRoutes = require('../src/routes/cashRegister.routes');
 const invoiceRoutes = require('../src/routes/invoice.routes');
 const auditRoutes = require('../src/routes/audit.routes');
+const notificationRoutes = require('../src/routes/notification.routes');
 
 // Middleware de error
 const errorHandler = require('../src/middleware/errorHandler');
@@ -82,6 +83,7 @@ app.use('/api/v1/settings', settingRoutes);
 app.use('/api/v1/cash-registers', cashRegisterRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/audit', auditRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // Error handler
 app.use(errorHandler);
