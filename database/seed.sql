@@ -433,7 +433,8 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('cash.alert_email', '"alonsoveloz@gmail.com"', 'Email para alertas de caja', 'cash'),
 
 ('invoice.business_name', '"ParkingPro"', 'Nombre del negocio en facturas', 'invoice'),
-('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice')
+('invoice.business_rnc', '""', 'RNC del negocio (completar en producción)', 'invoice'),
+('company_rnc', '""', 'RNC para Reportes Fiscales DGII (606/607) - se sincroniza con business_rnc', 'facturacion')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
