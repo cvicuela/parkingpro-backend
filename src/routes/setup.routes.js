@@ -62,10 +62,13 @@ router.get('/status', async (req, res) => {
         );
 
         const plansConfigured = plansResult.rows[0].count > 0;
-        const terminalsConfigured = terminalsResult.rows[0].count > 0;
+        const terminalsCount = terminalsResult.rows[0].count;
+        const terminalsConfigured = terminalsCount > 0;
         const adminExists = usersResult.rows[0].count > 0;
 
-        const isSetupComplete = businessConfigured && plansConfigured && terminalsConfigured && adminExists;
+        // Software setup only requires admin + business + plans
+        // Terminals are physical hardware and optional for base operation
+        const isSetupComplete = businessConfigured && plansConfigured && adminExists;
 
         res.json({
             isSetupComplete,
@@ -75,6 +78,10 @@ router.get('/status', async (req, res) => {
                 businessConfigured,
                 plansConfigured,
                 terminalsConfigured,
+            },
+            hardware: {
+                terminalsInstalled: terminalsConfigured,
+                terminalsCount,
             }
         });
     } catch (error) {
