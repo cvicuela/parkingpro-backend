@@ -1,6 +1,7 @@
 -- ============================================
 -- PARKINGPRO DATABASE SCHEMA
 -- Incluye sistema de parqueo por horas configurable
+-- Synced with Supabase production (project ppxjjsfacbepctslyrma) on 2026-03-22
 -- ============================================
 
 -- ============================================
@@ -286,10 +287,16 @@ CREATE TABLE IF NOT EXISTS payments (
     -- Metadata
     metadata JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
-    
+
+    -- Campos adicionales de producción
+    card_last_four VARCHAR(4),
+    authorization_code VARCHAR(100),
+    transaction_ref VARCHAR(255),
+    webhook_verified BOOLEAN DEFAULT FALSE,
+
     CONSTRAINT positive_amounts CHECK (
-        amount >= 0 AND 
-        tax_amount >= 0 AND 
+        amount >= 0 AND
+        tax_amount >= 0 AND
         total_amount >= 0
     )
 );
@@ -404,7 +411,10 @@ CREATE TABLE IF NOT EXISTS parking_sessions (
     
     -- Estado
     status session_status DEFAULT 'active',
-    
+
+    -- Verificación
+    verification_code VARCHAR(50),
+
     -- Metadata
     metadata JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -460,7 +470,7 @@ CREATE TABLE IF NOT EXISTS settings (
     description TEXT,
     category VARCHAR(50),
     updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
@@ -730,6 +740,38 @@ LEFT JOIN customers c ON ps.customer_id = c.id
 JOIN plans p ON ps.plan_id = p.id
 WHERE ps.status = 'active'
 ORDER BY ps.entry_time DESC;
+
+-- ============================================
+-- TABLA DE SECUENCIAS NCF (Números Comprobantes Fiscales)
+-- Columnas alineadas con producción Supabase (synced 2026-03-22)
+-- ============================================
+CREATE TABLE IF NOT EXISTS ncf_sequences (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    ncf_type VARCHAR(10) NOT NULL,          -- e.g. 'B01', 'B02', 'B14', 'B15', 'B16'
+    series VARCHAR(5),                       -- e.g. 'E'
+    prefix VARCHAR(10),
+    current_number BIGINT NOT NULL DEFAULT 1,
+    range_from BIGINT NOT NULL DEFAULT 1,
+    range_to BIGINT NOT NULL,
+    alert_threshold INT DEFAULT 100,
+    is_active BOOLEAN DEFAULT TRUE,
+    description TEXT,
+    authorized_date DATE,
+    expiration_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    CONSTRAINT ncf_range_valid CHECK (range_from <= range_to),
+    CONSTRAINT ncf_current_in_range CHECK (current_number >= range_from AND current_number <= range_to + 1),
+    UNIQUE(ncf_type, series, is_active)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ncf_sequences_type ON ncf_sequences(ncf_type);
+CREATE INDEX IF NOT EXISTS idx_ncf_sequences_is_active ON ncf_sequences(is_active);
+CREATE INDEX IF NOT EXISTS idx_ncf_sequences_expiration ON ncf_sequences(expiration_date);
+
+CREATE OR REPLACE TRIGGER update_ncf_sequences_updated_at BEFORE UPDATE ON ncf_sequences
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
 -- PUSH NOTIFICATION SUBSCRIPTIONS
