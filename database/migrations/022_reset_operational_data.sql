@@ -83,7 +83,8 @@ BEGIN
   DELETE FROM audit_logs WHERE action != 'SYSTEM_RESET' OR created_at < NOW() - INTERVAL '1 second';
 
   -- Reset NCF current sequences back to their start values (keep the ranges)
-  UPDATE ncf_sequences SET current_number = 0 WHERE current_number > 0;
+  -- Use range_from (not 0) to respect the ncf_current_in_range CHECK constraint
+  UPDATE ncf_sequences SET current_number = range_from WHERE current_number > range_from;
 
   -- Reset internal invoice counter
   UPDATE settings SET value = '"1"' WHERE key = 'internal_invoice_next';
