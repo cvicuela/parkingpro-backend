@@ -58,28 +58,17 @@ BEGIN
     json_build_object('action', 'reset_operational_data', 'timestamp', NOW()::TEXT)::JSONB,
     '0.0.0.0');
 
-  -- Delete in order respecting foreign keys
-  -- 1. denomination_counts depends on cash_registers
-  DELETE FROM denomination_counts;
-  -- 2. cash_register_transactions depends on cash_registers
-  DELETE FROM cash_register_transactions;
-  -- 3. cash_registers depends on users
-  DELETE FROM cash_registers;
-  -- 4. invoices depends on payments
-  DELETE FROM invoices;
-  -- 5. payments depends on subscriptions/customers
-  DELETE FROM payments;
-  -- 6. access_events depends on subscriptions
-  DELETE FROM access_events;
-  -- 7. parking_sessions
-  DELETE FROM parking_sessions;
-  -- 8. incidents
-  DELETE FROM incidents;
-  -- 9. notifications
-  DELETE FROM notifications;
-  -- 10. otp_codes
-  DELETE FROM otp_codes;
-  -- 11. audit_logs (except the reset log we just created)
+  -- Delete in order respecting foreign keys (WHERE true satisfies pg_safeupdate)
+  DELETE FROM denomination_counts WHERE true;
+  DELETE FROM cash_register_transactions WHERE true;
+  DELETE FROM cash_registers WHERE true;
+  DELETE FROM invoices WHERE true;
+  DELETE FROM payments WHERE true;
+  DELETE FROM access_events WHERE true;
+  DELETE FROM parking_sessions WHERE true;
+  DELETE FROM incidents WHERE true;
+  DELETE FROM notifications WHERE true;
+  DELETE FROM otp_codes WHERE true;
   DELETE FROM audit_logs WHERE action != 'SYSTEM_RESET' OR created_at < NOW() - INTERVAL '1 second';
 
   -- Reset NCF current sequences back to their start values (keep the ranges)
