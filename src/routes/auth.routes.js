@@ -50,7 +50,7 @@ router.post('/register', async (req, res, next) => {
         }
 
         // Hash password
-        const passwordHash = await bcrypt.hash(password, 10);
+        const passwordHash = await bcrypt.hash(password, 12);
         
         // Crear usuario
         const userResult = await query(
@@ -134,19 +134,15 @@ router.post('/login', async (req, res, next) => {
             `SELECT * FROM users WHERE email = $1 AND status = 'active'`,
             [email]
         );
-        
-        if (result.rows.length === 0) {
-            return res.status(401).json({
-                error: 'Credenciales inválidas'
-            });
-        }
-        
-        const user = result.rows[0];
-        
-        // Verificar password
-        const validPassword = await bcrypt.compare(password, user.password_hash);
-        
-        if (!validPassword) {
+
+        const user = result.rows[0] || null;
+
+        // Timing-safe: always run bcrypt.compare to prevent user enumeration
+        // Use a dummy hash when user doesn't exist so timing is consistent
+        const dummyHash = '$2b$12$LJ3m4ys3Lg7Xt3TjEOBcaOBZPf.YRmGSmScaHTaw6zMJRMLwv4MeS';
+        const validPassword = await bcrypt.compare(password, user?.password_hash || dummyHash);
+
+        if (!user || !validPassword) {
             return res.status(401).json({
                 error: 'Credenciales inválidas'
             });

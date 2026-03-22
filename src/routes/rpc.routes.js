@@ -13,6 +13,17 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
+const { authenticate } = require('../middleware/auth');
+
+// Valid PostgreSQL identifier pattern (prevents SQL injection via param keys)
+const VALID_IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/i;
+
+// RPC functions that DON'T require authentication (public endpoints)
+const PUBLIC_FUNCTIONS = new Set([
+    'authenticate',
+    'register_user',
+    'get_server_time',
+]);
 
 // Whitelist of allowed RPC functions to prevent arbitrary SQL execution
 const ALLOWED_FUNCTIONS = new Set([
@@ -123,7 +134,11 @@ const ALLOWED_FUNCTIONS = new Set([
 ]);
 
 // POST /api/v1/rpc/:functionName
-router.post('/:functionName', async (req, res) => {
+// Auth middleware conditionally applied: public functions skip auth
+router.post('/:functionName', (req, res, next) => {
+    if (PUBLIC_FUNCTIONS.has(req.params.functionName)) return next();
+    authenticate(req, res, next);
+}, async (req, res) => {
     const { functionName } = req.params;
 
     // Security: only allow whitelisted functions
@@ -137,14 +152,22 @@ router.post('/:functionName', async (req, res) => {
         const params = req.body || {};
         const paramKeys = Object.keys(params);
 
+        // Security: validate all parameter key names against valid SQL identifier pattern
+        for (const key of paramKeys) {
+            if (!VALID_IDENTIFIER.test(key)) {
+                return res.status(400).json({
+                    error: `Nombre de parámetro inválido: "${key}"`,
+                });
+            }
+        }
+
         if (paramKeys.length === 0) {
             // No parameters
             const result = await pool.query(`SELECT * FROM ${functionName}()`);
             return res.json(result.rows.length === 1 ? result.rows[0] : result.rows);
         }
 
-        // Build parameterized call: SELECT * FROM fn($1, $2, ...)
-        const placeholders = paramKeys.map((_, i) => `$${i + 1}`).join(', ');
+        // Build parameterized call: SELECT * FROM fn(key := $1, ...)
         const namedPlaceholders = paramKeys.map((key, i) => `${key} := $${i + 1}`).join(', ');
         const values = paramKeys.map(k => {
             const v = params[k];

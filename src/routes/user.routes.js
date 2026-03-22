@@ -72,7 +72,7 @@ router.post('/', async (req, res, next) => {
         }
 
         // Hash password
-        const passwordHash = await bcrypt.hash(password, 10);
+        const passwordHash = await bcrypt.hash(password, 12);
 
         // Crear usuario
         const userResult = await query(
@@ -164,7 +164,7 @@ router.put('/:id', async (req, res, next) => {
             values.push(status);
         }
         if (password) {
-            const passwordHash = await bcrypt.hash(password, 10);
+            const passwordHash = await bcrypt.hash(password, 12);
             updates.push(`password_hash = $${paramCount++}`);
             values.push(passwordHash);
         }
@@ -332,7 +332,7 @@ router.put('/:id/reset-password', async (req, res, next) => {
         }
 
         // Hash nueva contraseña
-        const passwordHash = await bcrypt.hash(newPassword, 10);
+        const passwordHash = await bcrypt.hash(newPassword, 12);
 
         await query(
             `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,

@@ -4,7 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { query } = require('../config/database');
 
 // List all terminals
-router.get('/', authenticate, async (req, res, next) => {
+router.get('/', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
   try {
     const result = await query('SELECT * FROM terminals WHERE is_active = true ORDER BY code');
     res.json({ data: result.rows });

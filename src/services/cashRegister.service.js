@@ -2,6 +2,19 @@ const { query, transaction } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 const emailService = require('./email.service');
 
+async function getSetting(key, defaultValue = null) {
+    try {
+        const result = await query('SELECT value FROM settings WHERE key = $1', [key]);
+        if (result.rows.length > 0) {
+            const val = result.rows[0].value;
+            return typeof val === 'string' ? val : JSON.stringify(val);
+        }
+        return defaultValue;
+    } catch {
+        return defaultValue;
+    }
+}
+
 class CashRegisterService {
 
     // ─── APERTURA DE CAJA ────────────────────────────────────────────────────

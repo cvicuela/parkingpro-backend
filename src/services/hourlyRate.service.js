@@ -1,4 +1,4 @@
-const { query } = require('../config/database');
+const { query, pool } = require('../config/database');
 const { differenceInMinutes, addMinutes } = require('date-fns');
 
 /**

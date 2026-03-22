@@ -3,7 +3,7 @@ const router = express.Router();
 const zktecoService = require('../services/zkteco.service');
 const accessControlService = require('../services/accessControl.service');
 const qrcodeService = require('../services/qrcode.service');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 
 /**
  * Middleware de autenticacion para dispositivos ZKTeco
@@ -30,7 +30,7 @@ const authenticateDevice = (req, res, next) => {
  * @route   GET /api/v1/zkteco/devices
  * @desc    Listar todos los dispositivos registrados
  */
-router.get('/devices', authenticate, async (req, res, next) => {
+router.get('/devices', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const { type, location, status, direction } = req.query;
         const devices = await zktecoService.getDevices({ type, location, status, direction });
@@ -44,7 +44,7 @@ router.get('/devices', authenticate, async (req, res, next) => {
  * @route   GET /api/v1/zkteco/devices/:serial
  * @desc    Obtener un dispositivo por numero de serie
  */
-router.get('/devices/:serial', authenticate, async (req, res, next) => {
+router.get('/devices/:serial', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -58,7 +58,7 @@ router.get('/devices/:serial', authenticate, async (req, res, next) => {
  * @route   POST /api/v1/zkteco/devices
  * @desc    Registrar un nuevo dispositivo ZKTeco
  */
-router.post('/devices', authenticate, async (req, res, next) => {
+router.post('/devices', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
     try {
         const { serial_number, name, type, model, ip_address, port, location, direction, protocol, connected_devices, firmware_version, ...config } = req.body;
 
@@ -89,7 +89,7 @@ router.post('/devices', authenticate, async (req, res, next) => {
  * @route   PUT /api/v1/zkteco/devices/:serial
  * @desc    Actualizar configuracion de un dispositivo
  */
-router.put('/devices/:serial', authenticate, async (req, res, next) => {
+router.put('/devices/:serial', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
     try {
         const device = await zktecoService.updateDevice(req.params.serial, req.body);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -103,7 +103,7 @@ router.put('/devices/:serial', authenticate, async (req, res, next) => {
  * @route   DELETE /api/v1/zkteco/devices/:serial
  * @desc    Eliminar un dispositivo
  */
-router.delete('/devices/:serial', authenticate, async (req, res, next) => {
+router.delete('/devices/:serial', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
     try {
         const removed = await zktecoService.removeDevice(req.params.serial);
         if (!removed) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -119,7 +119,7 @@ router.delete('/devices/:serial', authenticate, async (req, res, next) => {
  * @route   POST /api/v1/zkteco/devices/:serial/open
  * @desc    Abrir barrera de forma remota desde el dashboard
  */
-router.post('/devices/:serial/open', authenticate, async (req, res, next) => {
+router.post('/devices/:serial/open', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -158,7 +158,7 @@ router.post('/devices/:serial/open', authenticate, async (req, res, next) => {
  * @route   POST /api/v1/zkteco/devices/:serial/close
  * @desc    Cerrar barrera de forma remota
  */
-router.post('/devices/:serial/close', authenticate, async (req, res, next) => {
+router.post('/devices/:serial/close', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -187,7 +187,7 @@ router.post('/devices/:serial/close', authenticate, async (req, res, next) => {
  * @desc    Solicitar lectura de tarjeta RFID desde un lector conectado.
  *          Pone el lector en modo escucha y notifica via Socket.IO
  */
-router.post('/devices/:serial/read-card', authenticate, async (req, res, next) => {
+router.post('/devices/:serial/read-card', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -233,7 +233,7 @@ router.post('/devices/:serial/read-card', authenticate, async (req, res, next) =
  * @route   POST /api/v1/zkteco/devices/:serial/stop-reading
  * @desc    Detener modo lectura
  */
-router.post('/devices/:serial/stop-reading', authenticate, async (req, res, next) => {
+router.post('/devices/:serial/stop-reading', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
     try {
         const device = await zktecoService.getDevice(req.params.serial);
         if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
