@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParkingPro Server</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .header-icon {
+      width: 48px; height: 48px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px;
+    }
+    .header h1 { font-size: 20px; font-weight: 700; color: white; }
+    .header p { font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 2px; }
+
+    /* Status Bar */
+    .status-bar {
+      background: #1e293b;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid #334155;
+    }
+    .status-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.running { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    .status-dot.starting { background: #f59e0b; animation: pulse 1s infinite; }
+    .status-dot.stopped { background: #64748b; }
+    .status-dot.error { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+    .status-text { flex: 1; }
+    .status-text .label { font-size: 14px; font-weight: 600; }
+    .status-text .detail { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+    /* Actions */
+    .actions {
+      padding: 16px 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .btn {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-green { background: #16a34a; color: white; }
+    .btn-amber { background: #d97706; color: white; }
+    .btn-red { background: #dc2626; color: white; }
+    .btn-slate { background: #334155; color: #e2e8f0; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Quick Links */
+    .links {
+      padding: 0 24px 12px;
+      display: flex;
+      gap: 10px;
+    }
+    .link-card {
+      flex: 1;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .link-card:hover { border-color: #4f46e5; background: #1e2d4a; }
+    .link-card .lc-icon { font-size: 20px; margin-bottom: 6px; }
+    .link-card .lc-title { font-size: 13px; font-weight: 600; }
+    .link-card .lc-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+    /* Log Console */
+    .console-header {
+      padding: 10px 24px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .console-header button {
+      background: none; border: none; color: #64748b; cursor: pointer;
+      font-size: 11px;
+    }
+    .console-header button:hover { color: #94a3b8; }
+    .console {
+      flex: 1;
+      margin: 0 24px 16px;
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #94a3b8;
+    }
+    .console .log-line { white-space: pre-wrap; word-break: break-all; }
+    .console .log-line.error { color: #f87171; }
+    .console .log-line.system { color: #60a5fa; }
+    .console .log-line.backend { color: #a78bfa; }
+
+    /* Footer */
+    .footer {
+      padding: 8px 24px;
+      font-size: 10px;
+      color: #475569;
+      text-align: center;
+      border-top: 1px solid #1e293b;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-icon">P</div>
+    <div>
+      <h1>ParkingPro Server</h1>
+      <p>Panel de Control Local</p>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div id="statusDot" class="status-dot stopped"></div>
+    <div class="status-text">
+      <div class="label" id="statusLabel">Detenido</div>
+      <div class="detail" id="statusDetail">Puerto: 3000</div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-green" id="btnStart" onclick="startServer()">&#9654; Iniciar</button>
+    <button class="btn btn-red" id="btnStop" onclick="stopServer()" disabled>&#9632; Detener</button>
+    <button class="btn btn-amber" id="btnRestart" onclick="restartServer()" disabled>&#8635; Reiniciar</button>
+    <button class="btn btn-slate" id="btnFolder" onclick="openFolder()">&#128193; Abrir Carpeta</button>
+  </div>
+
+  <div class="links">
+    <div class="link-card" onclick="openPWA()">
+      <div class="lc-icon">&#128187;</div>
+      <div class="lc-title">PWA Operador</div>
+      <div class="lc-desc">Interfaz de operaciones</div>
+    </div>
+    <div class="link-card" onclick="openAdmin()">
+      <div class="lc-icon">&#9881;</div>
+      <div class="lc-title">Panel Admin</div>
+      <div class="lc-desc">Administración del sistema</div>
+    </div>
+  </div>
+
+  <div class="console-header">
+    <span>Registro del Servidor</span>
+    <button onclick="clearLogs()">Limpiar</button>
+  </div>
+  <div class="console" id="console"></div>
+
+  <div class="footer">ParkingPro Desktop &mdash; Servidor Local</div>
+
+  <script>
+    const consoleEl = document.getElementById('console');
+    const statusDot = document.getElementById('statusDot');
+    const statusLabel = document.getElementById('statusLabel');
+    const statusDetail = document.getElementById('statusDetail');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const btnRestart = document.getElementById('btnRestart');
+
+    const statusMap = {
+      running: { label: 'Servidor Activo', dot: 'running', color: '#22c55e' },
+      starting: { label: 'Iniciando...', dot: 'starting', color: '#f59e0b' },
+      stopped: { label: 'Detenido', dot: 'stopped', color: '#64748b' },
+      error: { label: 'Error', dot: 'error', color: '#ef4444' },
+    };
+
+    function updateStatus(status, port) {
+      const s = statusMap[status] || statusMap.stopped;
+      statusDot.className = `status-dot ${s.dot}`;
+      statusLabel.textContent = s.label;
+      statusDetail.textContent = `Puerto: ${port || 3000}`;
+      btnStart.disabled = status === 'running' || status === 'starting';
+      btnStop.disabled = status === 'stopped';
+      btnRestart.disabled = status === 'stopped';
+    }
+
+    function addLog(msg) {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      if (msg.includes('[backend:err]')) line.classList.add('error');
+      else if (msg.includes('[system]')) line.classList.add('system');
+      else if (msg.includes('[backend]')) line.classList.add('backend');
+      line.textContent = msg;
+      consoleEl.appendChild(line);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    function clearLogs() {
+      consoleEl.innerHTML = '';
+    }
+
+    async function startServer() { await window.api.startServer(); }
+    async function stopServer() { await window.api.stopServer(); }
+    async function restartServer() { await window.api.restartServer(); }
+    async function openPWA() { await window.api.openPWA(); }
+    async function openAdmin() { await window.api.openAdmin(); }
+    async function openFolder() { await window.api.openBackendFolder(); }
+
+    // Listen for updates
+    window.api.onLog(addLog);
+    window.api.onStatusChanged(({ status, port }) => updateStatus(status, port));
+
+    // Load initial state
+    window.api.getStatus().then(({ status, port, logs }) => {
+      updateStatus(status, port);
+      logs.forEach(addLog);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+{
+  "name": "parkingpro-desktop",
+  "version": "1.0.0",
+  "description": "ParkingPro - Local Desktop Deployment",
+  "main": "src/main.js",
+  "author": "ParkingPro",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:pwa": "cd ../../parkingpro-pwa && npm run build",
+    "build:app": "cd ../../parkingpro-app && npm run build",
+    "build:frontends": "npm run build:pwa && npm run build:app",
+    "bundle": "node scripts/bundle.js",
+    "dist": "npm run build:frontends && npm run bundle && electron-builder",
+    "dist:win": "npm run build:frontends && npm run bundle && electron-builder --win",
+    "dist:dir": "npm run build:frontends && npm run bundle && electron-builder --dir"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "fix-path": "^4.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.parkingpro.desktop",
+    "productName": "ParkingPro",
+    "copyright": "Copyright (c) 2024 ParkingPro",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "bundled/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "bundled/backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ParkingPro"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+bundled/
+release/
+dist/
+*.exe
+.env
