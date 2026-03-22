@@ -2,6 +2,38 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const deployment = require('../config/deploymentMode');
+
+// GET /api/v1/setup/deployment-mode - Get current deployment mode
+// Public endpoint — needed by frontend before auth is configured
+router.get('/deployment-mode', (req, res) => {
+    res.json(deployment.toJSON());
+});
+
+// PUT /api/v1/setup/deployment-mode - Save preferred deployment mode to DB settings
+router.put('/deployment-mode', authenticate, authorize(['super_admin']), async (req, res) => {
+    try {
+        const { mode } = req.body;
+        const valid = ['remote', 'local', 'hybrid'];
+        if (!valid.includes(mode)) {
+            return res.status(400).json({ error: `Modo inválido. Use: ${valid.join(', ')}` });
+        }
+        await query(
+            `INSERT INTO settings (key, value, description, category, updated_by)
+             VALUES ('deployment_mode', $1, 'Modalidad de despliegue del sistema', 'system', $2)
+             ON CONFLICT (key) DO UPDATE SET value = $1, updated_by = $2, updated_at = NOW()`,
+            [JSON.stringify(mode), req.user.id]
+        );
+        res.json({
+            success: true,
+            message: `Modo cambiado a "${mode}". Reinicie el servidor con DEPLOYMENT_MODE=${mode} para aplicar.`,
+            mode
+        });
+    } catch (error) {
+        console.error('Error saving deployment mode:', error);
+        res.status(500).json({ error: 'Error al guardar modo de despliegue' });
+    }
+});
 
 // GET /api/v1/setup/status - Check if system needs first-time setup
 // Public endpoint (no auth required) - returns only boolean flags
@@ -37,6 +69,7 @@ router.get('/status', async (req, res) => {
 
         res.json({
             isSetupComplete,
+            deploymentMode: deployment.toJSON(),
             steps: {
                 adminCreated: adminExists,
                 businessConfigured,

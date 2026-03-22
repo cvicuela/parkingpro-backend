@@ -32,6 +32,7 @@ const notificationRoutes = require('./routes/notification.routes');
 const terminalRoutes = require('./routes/terminal.routes');
 const dgiiRoutes = require('./routes/dgii.routes');
 const setupRoutes = require('./routes/setup.routes');
+const rpcRoutes = require('./routes/rpc.routes');
 
 // Middleware de seguridad
 const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter, sensitiveOpsLimiter, reportLimiter } = require('./middleware/rateLimiter');
@@ -135,11 +136,13 @@ app.use('/api/', apiLimiter);
 // ==================== HEALTH CHECK ====================
 
 app.get('/health', (req, res) => {
+    const deployment = require('./config/deploymentMode');
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV
+        environment: process.env.NODE_ENV,
+        deploymentMode: deployment.toJSON()
     });
 });
 
@@ -168,6 +171,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/terminals', terminalRoutes);
 app.use('/api/v1/dgii', dgiiRoutes);
 app.use('/api/v1/setup', setupRoutes);
+app.use('/api/v1/rpc', rpcRoutes);
 
 // ==================== SPA FALLBACK ====================
 
@@ -193,10 +197,13 @@ app.use(errorHandler);
 // ==================== INICIAR SERVIDOR ====================
 
 server.listen(PORT, () => {
+    const deployment = require('./config/deploymentMode');
+
     console.log(`
 =============================================
   ParkingPro API Server
   Environment: ${process.env.NODE_ENV || 'development'}
+  Mode:        ${deployment.getLabel()}
   Port:        ${PORT}
   URL:         http://localhost:${PORT}
   Socket.IO:   Enabled
@@ -204,6 +211,12 @@ server.listen(PORT, () => {
   Time:        ${new Date().toLocaleString('es-DO')}
 =============================================
     `);
+
+    // Start hybrid sync engine if applicable
+    if (deployment.syncEnabled) {
+        const syncEngine = require('./services/syncEngine');
+        syncEngine.start();
+    }
 
     console.log('\nAvailable endpoints:');
     console.log('   GET  /health');

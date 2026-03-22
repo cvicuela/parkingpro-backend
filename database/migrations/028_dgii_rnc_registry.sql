@@ -116,16 +116,16 @@ BEGIN
     SELECT r.user_id INTO v_user_id
     FROM require_role(p_token, ARRAY['super_admin']) r;
 
-    FOR v_rec IN SELECT * FROM jsonb_array_elements(p_records) AS r
+    FOR v_rec IN SELECT value FROM jsonb_array_elements(p_records)
     LOOP
         INSERT INTO dgii_rnc_registry (rnc, business_name, trade_name, economic_activity, status, payment_regime, updated_at)
         VALUES (
-            v_rec.r->>'rnc',
-            COALESCE(v_rec.r->>'business_name', ''),
-            v_rec.r->>'trade_name',
-            v_rec.r->>'economic_activity',
-            COALESCE(v_rec.r->>'status', 'active'),
-            v_rec.r->>'payment_regime',
+            v_rec.value->>'rnc',
+            COALESCE(v_rec.value->>'business_name', ''),
+            v_rec.value->>'trade_name',
+            v_rec.value->>'economic_activity',
+            COALESCE(v_rec.value->>'status', 'active'),
+            v_rec.value->>'payment_regime',
             NOW()
         )
         ON CONFLICT (rnc) DO UPDATE SET
