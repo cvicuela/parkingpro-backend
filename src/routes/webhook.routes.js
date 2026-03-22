@@ -8,13 +8,17 @@ router.post('/cardnet', async (req, res, next) => {
     try {
         const { transactionId, status, responseCode, amount, merchantId, signature } = req.body;
 
-        // Verify webhook signature (HMAC with API key)
+        // Verify webhook signature (HMAC with API key) — REQUIRED when key is configured
         const crypto = require('crypto');
         const expectedKey = process.env.CARDNET_API_KEY;
-        if (expectedKey && signature) {
+        if (expectedKey) {
+            if (!signature) {
+                console.error('[Webhook] CardNet signature missing');
+                return res.status(401).json({ error: 'Signature required' });
+            }
             const payload = `${transactionId}|${status}|${amount}|${merchantId}`;
             const expected = crypto.createHmac('sha256', expectedKey).update(payload).digest('hex');
-            if (signature !== expected) {
+            if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
                 console.error('[Webhook] CardNet signature mismatch');
                 return res.status(401).json({ error: 'Invalid signature' });
             }

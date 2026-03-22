@@ -59,11 +59,18 @@ const io = new Server(server, {
 // Hacer io accesible desde las rutas
 app.set('io', io);
 
-// Socket.IO authentication middleware
+// Socket.IO authentication middleware — verify JWT
+const jwt = require('jsonwebtoken');
 io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Authentication required'));
-    next();
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.userId;
+        next();
+    } catch (err) {
+        next(new Error('Token inválido o expirado'));
+    }
 });
 
 io.on('connection', (socket) => {

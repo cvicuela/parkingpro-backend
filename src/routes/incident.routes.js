@@ -4,7 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { query } = require('../config/database');
 const { logAudit } = require('../middleware/audit');
 
-router.get('/', authenticate, async (req, res, next) => {
+router.get('/', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
   try {
     const { status, severity, type, limit = 50, offset = 0 } = req.query;
     let sql = `SELECT i.*, op.email AS operator_email, rb.email AS resolved_by_email
@@ -30,7 +30,7 @@ router.get('/', authenticate, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.post('/', authenticate, async (req, res, next) => {
+router.post('/', authenticate, authorize(['admin', 'super_admin', 'operator']), async (req, res, next) => {
   try {
     const { type, title, description, severity = 'medium', vehiclePlate, subscriptionId, photos } = req.body;
     const result = await query(
