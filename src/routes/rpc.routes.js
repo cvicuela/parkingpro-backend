@@ -192,6 +192,13 @@ router.post('/:functionName', (req, res, next) => {
 
     try {
         const params = req.body || {};
+
+        // For authenticated requests, inject the verified server-side token
+        // so PG functions always receive a valid token from the sessions table
+        if (req.token) {
+            params.p_token = req.token;
+        }
+
         const paramKeys = Object.keys(params);
 
         // Security: validate all parameter key names against valid SQL identifier pattern
