@@ -180,10 +180,22 @@ app.use('/api/v1/dgii', dgiiRoutes);
 app.use('/api/v1/setup', setupRoutes);
 app.use('/api/v1/rpc', rpcRoutes);
 
-// ==================== SPA FALLBACK ====================
+// ==================== ADMIN APP (static + SPA) ====================
+
+const adminDir = path.join(__dirname, '..', 'public', 'admin');
+app.use('/admin', express.static(adminDir));
+app.get('/admin/*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    const adminIndex = path.join(adminDir, 'index.html');
+    res.sendFile(adminIndex, (err) => {
+        if (err) next();
+    });
+});
+
+// ==================== SPA FALLBACK (PWA) ====================
 
 app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/')) {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/admin')) {
         return next();
     }
     const indexPath = path.join(__dirname, '..', 'public', 'index.html');
