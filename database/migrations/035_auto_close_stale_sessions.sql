@@ -39,10 +39,10 @@ DECLARE
 BEGIN
   UPDATE parking_sessions
   SET
-    status = 'completed',
+    status = 'closed',
     exit_time = NOW(),
     payment_status = CASE
-      WHEN payment_status = 'pending' THEN 'waived'
+      WHEN payment_status = 'pending' THEN 'refunded'
       ELSE payment_status
     END,
     metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
@@ -58,7 +58,7 @@ BEGIN
 
   -- Log to audit if any were closed
   IF v_count > 0 THEN
-    INSERT INTO audit_logs (action, table_name, details, created_at)
+    INSERT INTO audit_logs (action, entity_type, changes, created_at)
     VALUES ('auto_close_stale_sessions', 'parking_sessions',
             jsonb_build_object('sessions_closed', v_count, 'threshold', '48 hours'),
             NOW());
