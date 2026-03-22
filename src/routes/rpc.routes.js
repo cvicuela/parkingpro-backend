@@ -53,7 +53,11 @@ const ALLOWED_FUNCTIONS = new Set([
     'update_plan',
     'delete_plan',
     'get_occupancy',
+    'get_plan_occupancy',
     'get_hourly_rates',
+    'update_hourly_rates',
+    'calculate_hourly',
+    'calculate_parking_fee',
     // Subscriptions
     'list_subscriptions',
     'get_subscription',
@@ -63,12 +67,19 @@ const ALLOWED_FUNCTIONS = new Set([
     'suspend_subscription',
     'reactivate_subscription',
     'generate_subscription_qr',
+    'get_subscription_qr',
     // Access
     'register_entry',
     'register_exit',
     'validate_access',
+    'validate_exit',
     'list_active_sessions',
     'get_session',
+    'end_session',
+    'session_by_plate',
+    'session_payment',
+    'process_parking_payment',
+    'access_history',
     // Payments
     'list_payments',
     'get_payment',
@@ -79,6 +90,15 @@ const ALLOWED_FUNCTIONS = new Set([
     'get_revenue_report',
     'get_occupancy_report',
     'get_customer_report',
+    'report_revenue',
+    'report_occupancy',
+    'report_sessions',
+    'report_customers',
+    'report_invoices',
+    'report_cash_reconciliation',
+    'report_revenue_by_operator',
+    'report_executive_summary',
+    'report_export_csv',
     // Cash Registers
     'open_cash_register',
     'close_cash_register',
@@ -88,6 +108,7 @@ const ALLOWED_FUNCTIONS = new Set([
     'list_invoices',
     'get_invoice',
     'create_invoice_from_payment',
+    'invoice_stats',
     // RFID
     'register_rfid_card',
     'assign_rfid_card',
@@ -104,30 +125,51 @@ const ALLOWED_FUNCTIONS = new Set([
     'update_settings',
     'get_setting',
     'update_setting',
+    'list_settings',
     // Users
     'list_users',
     'get_user',
     'create_user',
     'update_user',
+    'list_system_users',
+    'create_system_user',
+    'update_system_user',
+    'reset_user_password',
     // Audit
     'list_audit_logs',
-    // DGII
+    'list_audit_actions',
+    // DGII / Fiscal
     'dgii_validate_rnc',
     'dgii_search_rnc',
     'dgii_rnc_stats',
     'dgii_import_rnc_batch',
+    'dgii_log_import',
+    'generate_606_report',
+    'generate_607_report',
+    // NCF
+    'list_ncf_sequences',
+    'update_ncf_sequence',
+    'assign_ncf_to_invoice',
     // Notifications
     'list_notifications',
     'send_notification',
+    'notification_stats',
     // Expenses
     'list_expenses',
     'create_expense',
     'update_expense',
     'delete_expense',
+    'expense_stats',
     // Incidents
     'list_incidents',
     'create_incident',
     'update_incident',
+    'resolve_incident',
+    // Data Management
+    'reset_data_preview',
+    'reset_operational_data',
+    // Access Control (gate)
+    'gate_verify',
     // Setup
     'get_server_time',
     'require_role',
