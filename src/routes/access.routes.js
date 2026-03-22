@@ -433,4 +433,42 @@ router.post('/sessions/auto-close-stale', authenticate, authorize(['admin', 'sup
     }
 });
 
+/**
+ * @route   POST /api/v1/access/cleanup-stale
+ * @desc    Trigger auto_close_stale_sessions() manually (closes sessions active > 48 hours)
+ * @access  Private (Admin only)
+ */
+router.post('/cleanup-stale', authenticate, authorize(['admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { data, error } = await supabase.rpc('auto_close_stale_sessions');
+
+        if (error) {
+            throw new Error(`Error al cerrar sesiones estancadas: ${error.message}`);
+        }
+
+        const sessionsClosed = data?.sessions_closed ?? 0;
+
+        // Emit socket event so dashboard reflects the change
+        try {
+            const io = req.app.get('io');
+            if (io && sessionsClosed > 0) {
+                io.to('dashboard').emit('stale_sessions_closed', {
+                    count: sessionsClosed,
+                    time: new Date().toISOString()
+                });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch (e) { /* non-critical */ }
+
+        res.json({
+            success: true,
+            message: `${sessionsClosed} sesión(es) estancada(s) cerrada(s) automáticamente`,
+            data: data,
+            sessions_closed: sessionsClosed
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 module.exports = router;
