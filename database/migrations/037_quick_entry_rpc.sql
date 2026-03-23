@@ -30,7 +30,7 @@ BEGIN
   END IF;
 
   -- 3. Check for active subscription (subscriptions has vehicle_id, not vehicle_plate)
-  SELECT s.id AS sub_id, s.customer_id, v.plate_number AS vehicle_plate,
+  SELECT s.id AS sub_id, s.customer_id, v.plate AS vehicle_plate,
          c.first_name || ' ' || c.last_name AS customer_name,
          p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.base_price
   INTO v_subscription
@@ -38,7 +38,7 @@ BEGIN
   JOIN plans p ON p.id = s.plan_id
   LEFT JOIN customers c ON c.id = s.customer_id
   LEFT JOIN vehicles v ON v.id = s.vehicle_id
-  WHERE v.plate_number = v_plate
+  WHERE v.plate = v_plate
     AND s.status = 'active'
     AND (s.current_period_end IS NULL OR s.current_period_end >= CURRENT_DATE)
   ORDER BY s.created_at DESC

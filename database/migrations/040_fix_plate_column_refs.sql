@@ -1,9 +1,130 @@
--- Migration 039: Billing RPC functions
--- Creates: generate_subscription_invoice, run_billing_cycle, list_billing_runs
+-- Migration 040: Fix plate_number → plate column references
+-- The vehicles table uses "plate" not "plate_number"
+-- Re-creates quick_entry and billing RPCs with correct column name
 
--- ============================================================
--- 1. generate_subscription_invoice
--- ============================================================
+-- ============================================
+-- 1. Fix quick_entry RPC
+-- ============================================
+CREATE OR REPLACE FUNCTION public.quick_entry(p_token TEXT, p_data JSONB)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_user_id UUID;
+  v_role VARCHAR;
+  v_plate VARCHAR;
+  v_plan RECORD;
+  v_subscription RECORD;
+  v_session RECORD;
+  v_event RECORD;
+  v_verification_code VARCHAR;
+  v_access_type VARCHAR := 'hourly';
+  v_customer_id UUID;
+  v_result JSON;
+BEGIN
+  -- 1. Authenticate
+  SELECT r.user_id, r.user_role INTO v_user_id, v_role
+  FROM require_role(p_token, ARRAY['operator', 'admin', 'super_admin']) r;
+
+  -- 2. Extract plate
+  v_plate := UPPER(TRIM(COALESCE(p_data->>'plateNumber', '')));
+  IF v_plate = '' THEN
+    RAISE EXCEPTION 'plateNumber es requerido';
+  END IF;
+
+  -- 3. Check for active subscription
+  SELECT s.id AS sub_id, s.customer_id, v.plate AS vehicle_plate,
+         c.first_name || ' ' || c.last_name AS customer_name,
+         p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.base_price
+  INTO v_subscription
+  FROM subscriptions s
+  JOIN plans p ON p.id = s.plan_id
+  LEFT JOIN customers c ON c.id = s.customer_id
+  LEFT JOIN vehicles v ON v.id = s.vehicle_id
+  WHERE v.plate = v_plate
+    AND s.status = 'active'
+    AND (s.current_period_end IS NULL OR s.current_period_end >= CURRENT_DATE)
+  ORDER BY s.created_at DESC
+  LIMIT 1;
+
+  IF v_subscription IS NOT NULL THEN
+    -- Subscription entry
+    v_access_type := 'subscription';
+    v_customer_id := v_subscription.customer_id;
+
+    INSERT INTO access_events (
+      subscription_id, vehicle_plate, type, timestamp,
+      validation_method, operator_id, was_valid
+    ) VALUES (
+      v_subscription.sub_id, v_plate, 'entry', NOW(),
+      'plate', v_user_id, true
+    ) RETURNING * INTO v_event;
+
+    v_result := json_build_object(
+      'success', true,
+      'data', json_build_object(
+        'id', v_event.id,
+        'entry_time', v_event.timestamp,
+        'vehicle_plate', v_plate,
+        'subscription_id', v_subscription.sub_id,
+        'plan_name', v_subscription.plan_name,
+        'plan_type', v_subscription.plan_type,
+        'base_price', v_subscription.base_price,
+        'customer_name', v_subscription.customer_name,
+        'verification_code', NULL
+      )
+    );
+  ELSE
+    -- Hourly entry: find hourly plan
+    SELECT p.id AS plan_id, p.name, p.type, p.base_price, p.capacity
+    INTO v_plan
+    FROM plans p
+    WHERE p.type = 'hourly' AND p.is_active = true
+    ORDER BY p.created_at ASC
+    LIMIT 1;
+
+    IF v_plan IS NULL THEN
+      RAISE EXCEPTION 'No hay plan por hora activo configurado';
+    END IF;
+
+    -- Check if already has active session
+    PERFORM 1 FROM parking_sessions
+    WHERE vehicle_plate = v_plate AND status = 'active';
+    IF FOUND THEN
+      RAISE EXCEPTION 'Este vehículo ya tiene una sesión activa';
+    END IF;
+
+    -- Generate verification code
+    v_verification_code := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
+
+    -- Create parking session
+    INSERT INTO parking_sessions (
+      vehicle_plate, plan_id, entry_time, status, verification_code
+    ) VALUES (
+      v_plate, v_plan.plan_id, NOW(), 'active', v_verification_code
+    ) RETURNING * INTO v_session;
+
+    v_result := json_build_object(
+      'success', true,
+      'data', json_build_object(
+        'id', v_session.id,
+        'entry_time', v_session.entry_time,
+        'vehicle_plate', v_plate,
+        'subscription_id', NULL,
+        'plan_name', v_plan.name,
+        'plan_type', v_plan.type,
+        'base_price', v_plan.base_price,
+        'customer_name', NULL,
+        'verification_code', v_verification_code
+      )
+    );
+  END IF;
+
+  RETURN v_result;
+END;
+$$;
+
+-- ============================================
+-- 2. Fix generate_subscription_invoice RPC
+-- ============================================
 CREATE OR REPLACE FUNCTION public.generate_subscription_invoice(
     p_token          TEXT,
     p_subscription_id UUID
@@ -41,7 +162,7 @@ BEGIN
     SELECT * INTO v_auth
     FROM public.require_role(p_token, ARRAY['admin', 'super_admin']);
 
-    -- Load subscription
+    -- Load subscription (FIXED: v.plate instead of v.plate_number)
     SELECT s.*, v.plate
     INTO v_sub
     FROM public.subscriptions s
@@ -130,7 +251,6 @@ BEGIN
         v_invoice_number := v_invoice_prefix || LPAD(v_invoice_next::TEXT, 8, '0');
         v_ncf := v_invoice_number;
 
-        -- Increment counter
         UPDATE public.settings
         SET value = to_jsonb((v_invoice_next + 1)::TEXT)
         WHERE key = 'internal_invoice_next';
@@ -251,9 +371,9 @@ END;
 $$;
 
 
--- ============================================================
--- 2. run_billing_cycle
--- ============================================================
+-- ============================================
+-- 3. Fix run_billing_cycle RPC
+-- ============================================
 CREATE OR REPLACE FUNCTION public.run_billing_cycle(
     p_token TEXT
 )
@@ -330,7 +450,7 @@ BEGIN
         COALESCE((SELECT (value#>>'{}')::BOOLEAN FROM public.settings WHERE key = 'billing.send_email'), false)
         INTO v_send_email;
 
-    -- Loop through due subscriptions
+    -- Loop through due subscriptions (FIXED: v.plate instead of v.plate_number)
     FOR v_sub IN
         SELECT s.*, v.plate
         FROM public.subscriptions s
@@ -544,7 +664,6 @@ BEGIN
                         'email'
                     );
                 EXCEPTION WHEN OTHERS THEN
-                    -- Notifications table may not exist; continue silently
                     NULL;
                 END;
             END IF;
@@ -586,7 +705,6 @@ BEGIN
     );
 
 EXCEPTION WHEN OTHERS THEN
-    -- Update billing_run to failed if we have an id
     IF v_run_id IS NOT NULL THEN
         UPDATE public.billing_runs
         SET status        = 'failed',
@@ -595,49 +713,6 @@ EXCEPTION WHEN OTHERS THEN
         WHERE id = v_run_id;
     END IF;
 
-    RETURN json_build_object(
-        'success', false,
-        'error',   SQLERRM,
-        'detail',  SQLSTATE
-    );
-END;
-$$;
-
-
--- ============================================================
--- 3. list_billing_runs
--- ============================================================
-CREATE OR REPLACE FUNCTION public.list_billing_runs(
-    p_token TEXT,
-    p_limit INTEGER DEFAULT 20
-)
-RETURNS JSON
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_auth   RECORD;
-    v_result JSON;
-BEGIN
-    -- Auth
-    SELECT * INTO v_auth
-    FROM public.require_role(p_token, ARRAY['admin', 'super_admin', 'operator']);
-
-    SELECT json_agg(r ORDER BY r.run_date DESC, r.started_at DESC)
-    INTO v_result
-    FROM (
-        SELECT *
-        FROM public.billing_runs
-        ORDER BY run_date DESC, started_at DESC
-        LIMIT p_limit
-    ) r;
-
-    RETURN json_build_object(
-        'success', true,
-        'data',    COALESCE(v_result, '[]'::JSON)
-    );
-
-EXCEPTION WHEN OTHERS THEN
     RETURN json_build_object(
         'success', false,
         'error',   SQLERRM,
