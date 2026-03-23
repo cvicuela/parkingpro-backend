@@ -41,8 +41,19 @@ BEGIN
   v_user_id := verify_token(p_token);
   IF v_user_id IS NULL THEN RETURN json_build_object('success', false, 'error', 'No autorizado'); END IF;
 
-  SELECT * INTO v_session FROM parking_sessions WHERE id = (p_data->>'sessionId')::UUID;
-  IF v_session IS NULL THEN RETURN json_build_object('success', false, 'error', 'Sesion no encontrada'); END IF;
+  IF p_data->>'sessionId' IS NULL OR p_data->>'sessionId' = '' THEN
+    RETURN json_build_object('success', false, 'error', 'sessionId no proporcionado en los datos de pago');
+  END IF;
+
+  BEGIN
+    SELECT * INTO v_session FROM parking_sessions WHERE id = (p_data->>'sessionId')::UUID;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN json_build_object('success', false, 'error', 'sessionId inválido: ' || COALESCE(p_data->>'sessionId', 'NULL'));
+  END;
+
+  IF v_session IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Sesion no encontrada para ID: ' || COALESCE(p_data->>'sessionId', 'NULL'));
+  END IF;
 
   IF v_session.payment_status = 'paid' OR v_session.status = 'paid' THEN
     RETURN json_build_object('success', false, 'error', 'Esta sesion ya fue pagada');
@@ -183,6 +194,77 @@ BEGIN
       'invoiceNumber', v_invoice.invoice_number, 'ncf', v_invoice.ncf, 'paidAt', NOW(),
       'verification_code', v_session.verification_code
     )
+  ));
+END;
+$$;
+
+-- ============================================================================
+-- FIX 2: Create missing register_exit function
+-- The frontend calls this for free exits (subscribers, grace period) and
+-- after paid exits to properly close the session.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.register_exit(p_token TEXT, p_data JSON)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE
+  v_user_id UUID;
+  v_session RECORD;
+  v_session_id UUID;
+BEGIN
+  v_user_id := verify_token(p_token);
+  IF v_user_id IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'No autorizado');
+  END IF;
+
+  v_session_id := (p_data->>'sessionId')::UUID;
+  IF v_session_id IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'sessionId requerido');
+  END IF;
+
+  SELECT * INTO v_session FROM parking_sessions WHERE id = v_session_id;
+  IF v_session IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Sesión no encontrada');
+  END IF;
+
+  -- Already closed/paid
+  IF v_session.status IN ('closed', 'paid') THEN
+    RETURN json_build_object('success', true, 'data', json_build_object(
+      'message', 'Sesión ya cerrada',
+      'sessionId', v_session.id,
+      'status', v_session.status
+    ));
+  END IF;
+
+  -- Close the session
+  UPDATE parking_sessions SET
+    exit_time = COALESCE(exit_time, NOW()),
+    status = CASE
+      WHEN (p_data->>'payment') IS NOT NULL AND (p_data->'payment'->>'paid')::BOOLEAN = true THEN 'paid'
+      ELSE 'closed'
+    END,
+    payment_status = CASE
+      WHEN (p_data->>'payment') IS NOT NULL AND (p_data->'payment'->>'paid')::BOOLEAN = true THEN 'paid'
+      ELSE COALESCE(payment_status, 'free')
+    END,
+    updated_at = NOW()
+  WHERE id = v_session_id;
+
+  -- Decrement plan occupancy
+  IF v_session.plan_id IS NOT NULL THEN
+    UPDATE plans SET
+      current_occupancy = GREATEST(0, COALESCE(current_occupancy, 1) - 1),
+      updated_at = NOW()
+    WHERE id = v_session.plan_id;
+  END IF;
+
+  -- Log audit
+  PERFORM log_audit(v_user_id, 'register_exit', 'parking_session', v_session_id,
+    jsonb_build_object('plate', v_session.vehicle_plate, 'status', v_session.status));
+
+  RETURN json_build_object('success', true, 'data', json_build_object(
+    'message', 'Salida registrada',
+    'sessionId', v_session_id,
+    'plate', v_session.vehicle_plate,
+    'exitTime', NOW()
   ));
 END;
 $$;
