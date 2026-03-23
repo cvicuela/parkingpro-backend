@@ -74,7 +74,7 @@ BEGIN
     );
   ELSE
     -- Hourly entry: find hourly plan
-    SELECT p.id AS plan_id, p.name, p.type, p.base_price, p.capacity
+    SELECT p.id AS plan_id, p.name, p.type, p.base_price, p.max_capacity
     INTO v_plan
     FROM plans p
     WHERE p.type = 'hourly' AND p.is_active = true
