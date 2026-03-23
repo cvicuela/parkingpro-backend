@@ -195,7 +195,8 @@ router.patch('/:id', authenticate, authorize(['admin', 'super_admin']), async (r
             'name', 'description', 'base_price', 'weekly_price',
             'start_hour', 'end_hour', 'crosses_midnight', 'tolerance_minutes',
             'max_capacity', 'daily_entry_limit', 'overage_hourly_rate',
-            'additional_vehicle_monthly', 'is_active', 'price_includes_tax', 'tax_rate'
+            'lost_ticket_fee', 'nfc_replacement_fee',
+            'is_active', 'price_includes_tax', 'tax_rate'
         ];
         
         for (const [key, value] of Object.entries(updates)) {

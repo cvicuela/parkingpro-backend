@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS plans (
     
     -- Cargos extras
     overage_hourly_rate DECIMAL(10,2) DEFAULT 100.00,
-    additional_vehicle_monthly DECIMAL(10,2) DEFAULT 500.00,
+    lost_ticket_fee DECIMAL(10,2) DEFAULT 500.00,
+    nfc_replacement_fee DECIMAL(10,2) DEFAULT 150.00,
     
     -- Metadata
     is_active BOOLEAN DEFAULT TRUE,
