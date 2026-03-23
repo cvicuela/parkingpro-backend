@@ -603,7 +603,7 @@ router.post('/lost-ticket-charge', authenticate, authorize(['operator', 'admin',
             success: true,
             data: {
                 type: 'lost_ticket',
-                plateNumber: plateNumber.toUpperCase(),
+                plateNumber: (plateNumber || '').toUpperCase(),
                 sessionId,
                 entryTime,
                 planName,

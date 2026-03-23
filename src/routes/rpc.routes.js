@@ -69,6 +69,8 @@ const ALLOWED_FUNCTIONS = new Set([
     'generate_subscription_qr',
     'get_subscription_qr',
     // Access
+    'quick_entry',
+    'lost_ticket_charge',
     'register_entry',
     'register_exit',
     'validate_access',
