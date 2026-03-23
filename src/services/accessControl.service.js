@@ -365,7 +365,11 @@ class AccessControlService {
                 const result = {
                     type: 'subscription',
                     event: eventResult.rows[0],
-                    metadata
+                    metadata,
+                    plan_name: validationResult.subscription?.plan_name || null,
+                    plan_type: validationResult.subscription?.plan_type || null,
+                    subscription_id: validationResult.subscription?.id || null,
+                    customer_name: validationResult.subscription?.customer_name || null,
                 };
 
                 // Fire-and-forget push notification to admins
@@ -389,7 +393,10 @@ class AccessControlService {
 
                 return {
                     type: 'hourly',
-                    session
+                    session,
+                    plan_name: validationResult.plan?.name || 'Por Hora',
+                    plan_type: validationResult.plan?.type || 'hourly',
+                    base_price: validationResult.plan?.base_price || null,
                 };
             }
         });
