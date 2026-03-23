@@ -545,20 +545,32 @@ router.post('/cleanup-stale', authenticate, authorize(['admin', 'super_admin']),
  */
 router.post('/lost-ticket-charge', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
-        const { plateNumber, paymentMethod } = req.body;
-        if (!plateNumber) {
-            return res.status(400).json({ error: 'plateNumber es requerido' });
+        const { plateNumber, ticketNumber, paymentMethod } = req.body;
+        if (!plateNumber && !ticketNumber) {
+            return res.status(400).json({ error: 'plateNumber o ticketNumber es requerido' });
         }
 
-        // 1. Find active session by plate
-        const sessionResult = await dbQuery(
-            `SELECT ps.*, p.name as plan_name, p.type as plan_type, p.lost_ticket_fee, p.base_price
-             FROM parking_sessions ps
-             JOIN plans p ON ps.plan_id = p.id
-             WHERE ps.vehicle_plate = $1 AND ps.status = 'active'
-             ORDER BY ps.entry_time DESC LIMIT 1`,
-            [plateNumber.toUpperCase()]
-        );
+        // 1. Find active session by plate or verification_code (ticket #)
+        let sessionResult;
+        if (ticketNumber) {
+            sessionResult = await dbQuery(
+                `SELECT ps.*, p.name as plan_name, p.type as plan_type, p.lost_ticket_fee, p.base_price
+                 FROM parking_sessions ps
+                 JOIN plans p ON ps.plan_id = p.id
+                 WHERE ps.verification_code = $1 AND ps.status = 'active'
+                 ORDER BY ps.entry_time DESC LIMIT 1`,
+                [ticketNumber.toUpperCase()]
+            );
+        } else {
+            sessionResult = await dbQuery(
+                `SELECT ps.*, p.name as plan_name, p.type as plan_type, p.lost_ticket_fee, p.base_price
+                 FROM parking_sessions ps
+                 JOIN plans p ON ps.plan_id = p.id
+                 WHERE ps.vehicle_plate = $1 AND ps.status = 'active'
+                 ORDER BY ps.entry_time DESC LIMIT 1`,
+                [plateNumber.toUpperCase()]
+            );
+        }
 
         // 2. If no session, check settings for default fee
         let lostTicketFee, planName, sessionId, entryTime;
