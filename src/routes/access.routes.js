@@ -74,6 +74,73 @@ router.post('/validate', authenticate, authorize(['operator', 'admin', 'super_ad
 });
 
 /**
+ * @route   POST /api/v1/access/quick-entry
+ * @desc    Validar + registrar entrada en un solo paso (usado por el frontend)
+ * @access  Private (Operator, Admin)
+ */
+router.post('/quick-entry', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { plateNumber } = req.body;
+        if (!plateNumber) {
+            return res.status(400).json({ error: 'plateNumber es requerido' });
+        }
+
+        // 1. Validate
+        const validationResult = await accessControlService.validateEntry(plateNumber);
+        if (!validationResult.allowed) {
+            return res.status(403).json({
+                success: false,
+                error: validationResult.message || 'Acceso no permitido',
+                reason: validationResult.reason
+            });
+        }
+
+        // 2. Register entry
+        const entry = await accessControlService.registerEntry(plateNumber, validationResult, req.user.id);
+
+        // 3. Generate QR
+        const ticketId = entry.event?.id || entry.session?.id || Date.now().toString();
+        const qrCode = await qrcodeService.generateEntryQR({
+            ticketId,
+            plate: plateNumber,
+            accessType: validationResult.accessType,
+            entryTime: new Date().toISOString(),
+            planName: entry.plan_name || validationResult.subscription?.plan_name || validationResult.plan?.name,
+            customerName: entry.customer_name || validationResult.subscription?.customer_name || null
+        });
+
+        // Build unified response with plan info
+        const sessionData = entry.session || {};
+        const responseData = {
+            id: sessionData.id || entry.event?.id,
+            entry_time: sessionData.entry_time || entry.event?.timestamp || new Date().toISOString(),
+            vehicle_plate: plateNumber,
+            subscription_id: entry.subscription_id || (validationResult.accessType === 'subscription' ? validationResult.subscription?.id : null),
+            plan_name: entry.plan_name || validationResult.subscription?.plan_name || validationResult.plan?.name || null,
+            plan_type: entry.plan_type || validationResult.subscription?.plan_type || validationResult.plan?.type || null,
+            base_price: entry.base_price || validationResult.plan?.base_price || null,
+            customer_name: entry.customer_name || validationResult.subscription?.customer_name || null,
+            verification_code: sessionData.verification_code || null,
+        };
+
+        res.json({ success: true, data: responseData, qrCode });
+
+        // Emit real-time updates
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to('dashboard').emit('vehicle_entry', { plate: plateNumber, type: validationResult.accessType || 'hourly', time: new Date().toISOString() });
+                io.to('access_control').emit('vehicle_entry', { plate: plateNumber, type: validationResult.accessType || 'hourly', time: new Date().toISOString() });
+                emitOccupancyAndSessionUpdates(io);
+            }
+        } catch {}
+
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * @route   POST /api/v1/access/entry
  * @desc    Registrar entrada de vehículo
  * @access  Private (Operator, Admin)
