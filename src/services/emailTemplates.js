@@ -253,6 +253,8 @@ function paymentConfirmTemplate(data) {
     vehiclePlate = '',
     nextBillingDate = '',
     ncf = '',
+    items = null,
+    billing_period = '',
   } = data;
 
   const methodLabel = {
@@ -300,6 +302,26 @@ function paymentConfirmTemplate(data) {
       <tr>
         <td style="padding:20px 24px;">
           <table width="100%" cellpadding="0" cellspacing="0">
+            ${Array.isArray(items) && items.length > 0 ? `
+            <tr>
+              <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">Metodo de Pago</td>
+              <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${methodLabel}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">Fecha</td>
+              <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${paymentDate}</td>
+            </tr>
+            ${billing_period ? `
+            <tr>
+              <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">Periodo de Facturacion</td>
+              <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${billing_period}</td>
+            </tr>` : ''}
+            ${ncf ? `
+            <tr>
+              <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">NCF / No. Interno</td>
+              <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${ncf}</td>
+            </tr>` : ''}
+            ` : `
             <tr>
               <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">Plan / Concepto</td>
               <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${planName}</td>
@@ -322,7 +344,30 @@ function paymentConfirmTemplate(data) {
               <td style="padding:8px 0;font-size:14px;color:${BRAND.gray};">NCF</td>
               <td align="right" style="padding:8px 0;font-size:14px;font-weight:600;color:#111827;">${ncf}</td>
             </tr>` : ''}
+            `}
           </table>
+
+          ${Array.isArray(items) && items.length > 0 ? `
+          <div style="height:1px;background:#e5e7eb;margin:12px 0;"></div>
+
+          <!-- Items Table -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:6px 4px 6px 0;font-size:12px;font-weight:600;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.4px;">Descripcion</td>
+              <td align="center" style="padding:6px 4px;font-size:12px;font-weight:600;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.4px;white-space:nowrap;">Cant.</td>
+              <td align="right" style="padding:6px 4px;font-size:12px;font-weight:600;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.4px;white-space:nowrap;">Precio</td>
+              <td align="right" style="padding:6px 0 6px 4px;font-size:12px;font-weight:600;color:${BRAND.gray};text-transform:uppercase;letter-spacing:0.4px;white-space:nowrap;">Monto</td>
+            </tr>
+            <tr><td colspan="4" style="padding:0;"><div style="height:1px;background:#d1d5db;"></div></td></tr>
+            ${items.map(item => `
+            <tr>
+              <td style="padding:8px 4px 8px 0;font-size:13px;color:#374151;border-bottom:1px solid #e5e7eb;">${item.description || ''}</td>
+              <td align="center" style="padding:8px 4px;font-size:13px;color:#374151;border-bottom:1px solid #e5e7eb;white-space:nowrap;">${item.quantity != null ? item.quantity : ''}</td>
+              <td align="right" style="padding:8px 4px;font-size:13px;color:#374151;border-bottom:1px solid #e5e7eb;white-space:nowrap;">RD$${parseFloat(item.unit_price || 0).toFixed(2)}</td>
+              <td align="right" style="padding:8px 0 8px 4px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #e5e7eb;white-space:nowrap;">RD$${parseFloat(item.amount || 0).toFixed(2)}</td>
+            </tr>`).join('')}
+          </table>
+          ` : ''}
 
           <div style="height:1px;background:#e5e7eb;margin:12px 0;"></div>
 
@@ -362,6 +407,17 @@ function paymentConfirmTemplate(data) {
       </tr>
     </table>
     ` : ''}
+
+    <div style="height:20px;"></div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="background:${BRAND.grayLight};border-radius:10px;padding:12px 20px;text-align:center;">
+          <p style="margin:0;font-size:12px;color:${BRAND.gray};font-style:italic;">
+            Esta factura fue generada automaticamente por ${BRAND.name}.
+          </p>
+        </td>
+      </tr>
+    </table>
 
     <div style="height:28px;"></div>
     <table width="100%" cellpadding="0" cellspacing="0">
