@@ -40,7 +40,7 @@ BEGIN
   LEFT JOIN vehicles v ON v.id = s.vehicle_id
   WHERE v.plate_number = v_plate
     AND s.status = 'active'
-    AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
+    AND (s.current_period_end IS NULL OR s.current_period_end >= CURRENT_DATE)
   ORDER BY s.created_at DESC
   LIMIT 1;
 
@@ -51,10 +51,10 @@ BEGIN
 
     INSERT INTO access_events (
       subscription_id, vehicle_plate, type, timestamp,
-      validation_method, access_method, operator_id, was_valid
+      validation_method, operator_id, was_valid
     ) VALUES (
       v_subscription.sub_id, v_plate, 'entry', NOW(),
-      'plate', 'manual', v_user_id, true
+      'plate', v_user_id, true
     ) RETURNING * INTO v_event;
 
     v_result := json_build_object(
