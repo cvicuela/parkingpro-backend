@@ -413,9 +413,8 @@ INSERT INTO settings (key, value, description, category) VALUES
 ('limits.daily_entries', '"5"', 'Entradas permitidas por día (planes regulares)', 'limits'),
 ('limits.vehicles_per_customer', '"1"', 'Vehículos incluidos en plan base', 'limits'),
 
-('charges.overage_hour', '"100"', 'Cargo por hora fuera de horario', 'charges'),
-('charges.additional_vehicle_monthly', '"500"', 'Costo mensual por vehículo adicional', 'charges'),
-('charges.replacement_qr', '"150"', 'Costo de reemplazo de QR/tarjeta', 'charges'),
+('charges.lost_ticket', '"500"', 'Cargo por ticket perdido (RD$)', 'charges'),
+('charges.nfc_replacement', '"150"', 'Cargo por reposición de tarjeta NFC/RFID (RD$)', 'charges'),
 
 ('hourly.first_hour_rate', '"50"', 'Tarifa primera hora', 'hourly'),
 ('hourly.second_hour_rate', '"70"', 'Tarifa segunda hora', 'hourly'),

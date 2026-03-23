@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-// Importar rutas
+// Importar rutas (synced with src/server.js)
 const authRoutes = require('../src/routes/auth.routes');
 const customerRoutes = require('../src/routes/customer.routes');
 const vehicleRoutes = require('../src/routes/vehicle.routes');
@@ -19,9 +19,18 @@ const cashRegisterRoutes = require('../src/routes/cashRegister.routes');
 const invoiceRoutes = require('../src/routes/invoice.routes');
 const auditRoutes = require('../src/routes/audit.routes');
 const notificationRoutes = require('../src/routes/notification.routes');
+const rfidRoutes = require('../src/routes/rfid.routes');
+const userRoutes = require('../src/routes/user.routes');
+const expenseRoutes = require('../src/routes/expense.routes');
+const incidentRoutes = require('../src/routes/incident.routes');
+const terminalRoutes = require('../src/routes/terminal.routes');
+const dgiiRoutes = require('../src/routes/dgii.routes');
+const setupRoutes = require('../src/routes/setup.routes');
+const rpcRoutes = require('../src/routes/rpc.routes');
 
-// Middleware de error
+// Middleware
 const errorHandler = require('../src/middleware/errorHandler');
+const sanitizer = require('../src/middleware/sanitizer');
 
 const app = express();
 
@@ -42,6 +51,9 @@ app.use(compression());
 // Body parser
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Input sanitization
+app.use(sanitizer);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -70,7 +82,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Rutas API
+// Rutas API (synced with src/server.js)
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/vehicles', vehicleRoutes);
@@ -84,6 +96,14 @@ app.use('/api/v1/cash-registers', cashRegisterRoutes);
 app.use('/api/v1/invoices', invoiceRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/rfid', rfidRoutes);
+app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/expenses', expenseRoutes);
+app.use('/api/v1/incidents', incidentRoutes);
+app.use('/api/v1/terminals', terminalRoutes);
+app.use('/api/v1/dgii', dgiiRoutes);
+app.use('/api/v1/setup', setupRoutes);
+app.use('/api/v1/rpc', rpcRoutes);
 
 // Error handler
 app.use(errorHandler);
