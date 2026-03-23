@@ -16,6 +16,34 @@ const NCF_TYPES = {
 
 class InvoiceService {
 
+    // ─── OBTENER MODO DE FACTURACIÓN ────────────────────────────────────────
+
+    async _getInvoiceMode() {
+        const result = await query(
+            `SELECT value#>>'{}' as mode FROM settings WHERE key = 'invoice_mode'`
+        );
+        return result.rows.length > 0 ? result.rows[0].mode : 'interno';
+    }
+
+    async _nextInternalNumber() {
+        const prefixResult = await query(
+            `SELECT COALESCE(value#>>'{}', 'FAC') as prefix FROM settings WHERE key = 'internal_invoice_prefix'`
+        );
+        const nextResult = await query(
+            `SELECT COALESCE((value#>>'{}')::BIGINT, 1) as next_num FROM settings WHERE key = 'internal_invoice_next'`
+        );
+        const prefix = prefixResult.rows.length > 0 ? prefixResult.rows[0].prefix : 'FAC';
+        const nextNum = nextResult.rows.length > 0 ? nextResult.rows[0].next_num : 1;
+        const invoiceNumber = prefix + String(nextNum).padStart(8, '0');
+
+        await query(
+            `UPDATE settings SET value = to_jsonb(($1)::TEXT) WHERE key = 'internal_invoice_next'`,
+            [String(nextNum + 1)]
+        );
+
+        return invoiceNumber;
+    }
+
     // ─── GENERAR FACTURA DESDE PAGO ──────────────────────────────────────────
 
     async generateFromPayment(paymentId, { userId, req } = {}) {
@@ -45,28 +73,36 @@ class InvoiceService {
             return (await query('SELECT * FROM invoices WHERE payment_id = $1', [paymentId])).rows[0];
         }
 
-        const invoiceNumber = await this._nextInvoiceNumber();
-        const hasRnc = payment.rnc && payment.rnc.trim().length > 0;
+        const invoiceMode = await this._getInvoiceMode();
+        let invoiceNumber, ncf;
 
-        // B01 (Crédito Fiscal) si tiene RNC, B02 (Consumo) si no
-        const ncfType = hasRnc ? NCF_TYPES.CREDITO_FISCAL : NCF_TYPES.CONSUMO;
+        if (invoiceMode === 'fiscal') {
+            // Modo fiscal: usar secuencias NCF de DGII
+            const hasRnc = payment.rnc && payment.rnc.trim().length > 0;
+            const ncfType = hasRnc ? NCF_TYPES.CREDITO_FISCAL : NCF_TYPES.CONSUMO;
 
-        // Para B01, validar que el RNC exista en el registro DGII local
-        if (ncfType === NCF_TYPES.CREDITO_FISCAL) {
-            const cleanRnc = payment.rnc.replace(/[-\s]/g, '');
-            const rncCheck = await query(
-                `SELECT rnc, business_name, status FROM dgii_rnc_registry WHERE rnc = $1`,
-                [cleanRnc]
-            );
-            if (rncCheck.rows.length === 0) {
-                throw new Error(`RNC ${payment.rnc} no encontrado en el registro DGII local. Actualice la base de datos DGII o use B02 (Consumo).`);
+            // Para B01, validar que el RNC exista en el registro DGII local
+            if (ncfType === NCF_TYPES.CREDITO_FISCAL) {
+                const cleanRnc = payment.rnc.replace(/[-\s]/g, '');
+                const rncCheck = await query(
+                    `SELECT rnc, business_name, status FROM dgii_rnc_registry WHERE rnc = $1`,
+                    [cleanRnc]
+                );
+                if (rncCheck.rows.length === 0) {
+                    throw new Error(`RNC ${payment.rnc} no encontrado en el registro DGII local. Actualice la base de datos DGII o use B02 (Consumo).`);
+                }
+                if (rncCheck.rows[0].status !== 'active') {
+                    throw new Error(`RNC ${payment.rnc} tiene estado "${rncCheck.rows[0].status}" en DGII. No se puede emitir B01.`);
+                }
             }
-            if (rncCheck.rows[0].status !== 'active') {
-                throw new Error(`RNC ${payment.rnc} tiene estado "${rncCheck.rows[0].status}" en DGII. No se puede emitir B01.`);
-            }
+
+            ncf = await this._getNextNCF(ncfType);
+            invoiceNumber = ncf;
+        } else {
+            // Modo interno: numeración propia sin NCF fiscal
+            invoiceNumber = await this._nextInternalNumber();
+            ncf = invoiceNumber;
         }
-
-        const ncf = await this._getNextNCF(ncfType);
 
         const customerName = payment.first_name
             ? `${payment.first_name} ${payment.last_name}`.trim()
@@ -123,8 +159,16 @@ class InvoiceService {
         if (original.rows.length === 0) throw new Error('Factura original no encontrada');
 
         const inv = original.rows[0];
-        const invoiceNumber = await this._nextInvoiceNumber();
-        const ncf = await this._getNextNCF(NCF_TYPES.NOTA_CREDITO);
+        const invoiceMode = await this._getInvoiceMode();
+        let invoiceNumber, ncf;
+
+        if (invoiceMode === 'fiscal') {
+            ncf = await this._getNextNCF(NCF_TYPES.NOTA_CREDITO);
+            invoiceNumber = ncf;
+        } else {
+            invoiceNumber = await this._nextInternalNumber();
+            ncf = invoiceNumber;
+        }
 
         const result = await query(
             `INSERT INTO invoices
