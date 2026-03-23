@@ -29,15 +29,16 @@ BEGIN
     RAISE EXCEPTION 'plateNumber es requerido';
   END IF;
 
-  -- 3. Check for active subscription
-  SELECT s.id AS sub_id, s.customer_id, s.vehicle_plate,
+  -- 3. Check for active subscription (subscriptions has vehicle_id, not vehicle_plate)
+  SELECT s.id AS sub_id, s.customer_id, v.plate_number AS vehicle_plate,
          c.first_name || ' ' || c.last_name AS customer_name,
          p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.base_price
   INTO v_subscription
   FROM subscriptions s
   JOIN plans p ON p.id = s.plan_id
   LEFT JOIN customers c ON c.id = s.customer_id
-  WHERE s.vehicle_plate = v_plate
+  LEFT JOIN vehicles v ON v.id = s.vehicle_id
+  WHERE v.plate_number = v_plate
     AND s.status = 'active'
     AND (s.end_date IS NULL OR s.end_date >= CURRENT_DATE)
   ORDER BY s.created_at DESC
