@@ -538,4 +538,146 @@ router.post('/cleanup-stale', authenticate, authorize(['admin', 'super_admin']),
     }
 });
 
+/**
+ * @route   POST /api/v1/access/lost-ticket-charge
+ * @desc    Procesar cobro por ticket perdido — busca sesión por placa y aplica penalidad
+ * @access  Private (Operator, Admin)
+ */
+router.post('/lost-ticket-charge', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { plateNumber, paymentMethod } = req.body;
+        if (!plateNumber) {
+            return res.status(400).json({ error: 'plateNumber es requerido' });
+        }
+
+        // 1. Find active session by plate
+        const sessionResult = await dbQuery(
+            `SELECT ps.*, p.name as plan_name, p.type as plan_type, p.lost_ticket_fee, p.base_price
+             FROM parking_sessions ps
+             JOIN plans p ON ps.plan_id = p.id
+             WHERE ps.vehicle_plate = $1 AND ps.status = 'active'
+             ORDER BY ps.entry_time DESC LIMIT 1`,
+            [plateNumber.toUpperCase()]
+        );
+
+        // 2. If no session, check settings for default fee
+        let lostTicketFee, planName, sessionId, entryTime;
+
+        if (sessionResult.rows.length > 0) {
+            const session = sessionResult.rows[0];
+            lostTicketFee = parseFloat(session.lost_ticket_fee) || 500;
+            planName = session.plan_name;
+            sessionId = session.id;
+            entryTime = session.entry_time;
+        } else {
+            // No active session — use global setting
+            const settingResult = await dbQuery(
+                `SELECT value FROM settings WHERE key = 'charges.lost_ticket'`
+            );
+            lostTicketFee = settingResult.rows.length > 0
+                ? parseFloat(JSON.parse(settingResult.rows[0].value))
+                : 500;
+            planName = null;
+            sessionId = null;
+            entryTime = null;
+        }
+
+        // 3. Calculate total with tax
+        const subtotal = lostTicketFee;
+        const tax = Math.round(subtotal * 0.18 * 100) / 100;
+        const total = subtotal + tax;
+
+        res.json({
+            success: true,
+            data: {
+                type: 'lost_ticket',
+                plateNumber: plateNumber.toUpperCase(),
+                sessionId,
+                entryTime,
+                planName,
+                subtotal,
+                tax,
+                total,
+                lost_ticket_fee: lostTicketFee,
+                charge_reason: 'Cargo por ticket perdido',
+                payment_status: 'pending',
+                barrier_allowed: false,
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/nfc-replacement-charge
+ * @desc    Calcular cobro por reposición de tarjeta NFC/RFID perdida
+ * @access  Private (Operator, Admin)
+ */
+router.post('/nfc-replacement-charge', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { cardId, customerId, plateNumber } = req.body;
+
+        // 1. Get replacement fee from plan or settings
+        let nfcFee;
+
+        if (customerId) {
+            // Try to get fee from customer's active plan
+            const planResult = await dbQuery(
+                `SELECT p.nfc_replacement_fee, p.name as plan_name
+                 FROM subscriptions s
+                 JOIN plans p ON s.plan_id = p.id
+                 WHERE s.customer_id = $1 AND s.status = 'active'
+                 LIMIT 1`,
+                [customerId]
+            );
+            if (planResult.rows.length > 0) {
+                nfcFee = parseFloat(planResult.rows[0].nfc_replacement_fee) || 150;
+            }
+        }
+
+        if (!nfcFee) {
+            // Use global setting
+            const settingResult = await dbQuery(
+                `SELECT value FROM settings WHERE key = 'charges.nfc_replacement'`
+            );
+            nfcFee = settingResult.rows.length > 0
+                ? parseFloat(JSON.parse(settingResult.rows[0].value))
+                : 150;
+        }
+
+        // 2. Mark card as lost if cardId provided
+        if (cardId) {
+            await dbQuery(
+                `UPDATE rfid_cards SET status = 'lost', metadata = jsonb_set(COALESCE(metadata, '{}'), '{lost_at}', to_jsonb(NOW()::text))
+                 WHERE id = $1`,
+                [cardId]
+            );
+        }
+
+        // 3. Calculate total with tax
+        const subtotal = nfcFee;
+        const tax = Math.round(subtotal * 0.18 * 100) / 100;
+        const total = subtotal + tax;
+
+        res.json({
+            success: true,
+            data: {
+                type: 'nfc_replacement',
+                cardId,
+                customerId,
+                plateNumber: plateNumber || null,
+                subtotal,
+                tax,
+                total,
+                nfc_replacement_fee: nfcFee,
+                charge_reason: 'Cargo por reposición de tarjeta NFC/RFID',
+                payment_status: 'pending',
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 module.exports = router;
