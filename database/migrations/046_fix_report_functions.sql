@@ -8,6 +8,9 @@
 --      → Cast enum to TEXT; also fallback to parking_sessions when access_events is empty
 --   3. report_customers: topCustomers was empty when no paid payments exist
 --      → Removed HAVING > 0 filter so all customers show in ranking
+--   4. report_executive_summary: subscriptionRevenue was calculated as
+--      currentMonth - hourlyRevenue using inconsistent data sources (payments vs sessions)
+--      → Now computes subscriptionRevenue and hourlyRevenue from same payments table
 -- ============================================
 
 -- 1. Fix report_sessions
@@ -314,6 +317,115 @@ BEGIN
     'delinquent', v_delinquent,
     'churnTrend', v_churn_trend,
     'retentionRate', v_retention_rate
+  ));
+END;
+$$;
+
+
+-- 4. Fix report_executive_summary - consistent revenue sources
+DROP FUNCTION IF EXISTS report_executive_summary(text);
+
+CREATE OR REPLACE FUNCTION public.report_executive_summary(p_token TEXT)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_user_id UUID;
+  v_rev RECORD;
+  v_sub RECORD;
+  v_sess RECORD;
+  v_cash RECORD;
+  v_col RECORD;
+  v_ref RECORD;
+  v_change DECIMAL;
+BEGIN
+  SELECT r.user_id INTO v_user_id FROM require_role(p_token, ARRAY['admin', 'super_admin']) r;
+
+  -- Revenue from payments (single source for all revenue figures)
+  SELECT
+    COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) THEN total_amount END), 0) AS current_month,
+    COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+        AND created_at < DATE_TRUNC('month', CURRENT_DATE) THEN total_amount END), 0) AS previous_month,
+    COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) AND subscription_id IS NOT NULL THEN total_amount END), 0) AS subscription_revenue,
+    COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) AND subscription_id IS NULL THEN total_amount END), 0) AS hourly_revenue
+  INTO v_rev FROM payments WHERE status = 'paid';
+
+  SELECT
+    COUNT(*) FILTER (WHERE activated_at >= DATE_TRUNC('month', CURRENT_DATE)) AS new_this_month,
+    COUNT(*) FILTER (WHERE activated_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+        AND activated_at < DATE_TRUNC('month', CURRENT_DATE)) AS new_last_month,
+    COUNT(*) FILTER (WHERE cancelled_at >= DATE_TRUNC('month', CURRENT_DATE)) AS cancelled_this_month,
+    COUNT(*) FILTER (WHERE status = 'active') AS total_active
+  INTO v_sub FROM subscriptions;
+
+  SELECT
+    COUNT(*) FILTER (WHERE entry_time >= DATE_TRUNC('month', CURRENT_DATE)) AS sessions_this_month,
+    COALESCE(AVG(duration_minutes) FILTER (WHERE exit_time IS NOT NULL AND entry_time >= DATE_TRUNC('month', CURRENT_DATE)), 0) AS avg_duration_min
+  INTO v_sess FROM parking_sessions;
+
+  SELECT
+    COUNT(*) AS total_closures,
+    COALESCE(SUM(expected_balance), 0) AS total_expected,
+    COALESCE(SUM(counted_balance), 0) AS total_counted,
+    COALESCE(SUM(ABS(difference)), 0) AS total_abs_difference,
+    COUNT(*) FILTER (WHERE requires_approval = true) AS requiring_approval
+  INTO v_cash FROM cash_registers
+  WHERE status = 'closed' AND closed_at >= DATE_TRUNC('month', CURRENT_DATE);
+
+  SELECT
+    COUNT(*) FILTER (WHERE status = 'paid') AS paid_count,
+    COUNT(*) AS total_count,
+    COALESCE(SUM(total_amount) FILTER (WHERE status = 'paid'), 0) AS collected,
+    COALESCE(SUM(total_amount), 0) AS total_billed
+  INTO v_col FROM payments
+  WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE);
+
+  SELECT
+    COUNT(*) AS refund_count,
+    COALESCE(SUM(total_amount), 0) AS refund_total
+  INTO v_ref FROM payments
+  WHERE status = 'refunded' AND refunded_at >= DATE_TRUNC('month', CURRENT_DATE);
+
+  v_change := CASE WHEN v_rev.previous_month > 0
+    THEN ROUND(((v_rev.current_month - v_rev.previous_month) / v_rev.previous_month * 100)::NUMERIC, 2)
+    ELSE 0 END;
+
+  RETURN json_build_object('success', true, 'data', json_build_object(
+    'revenue', json_build_object(
+      'currentMonth', v_rev.current_month,
+      'previousMonth', v_rev.previous_month,
+      'subscriptionRevenue', v_rev.subscription_revenue,
+      'hourlyRevenue', v_rev.hourly_revenue,
+      'changePercent', v_change,
+      'trend', CASE WHEN v_change >= 0 THEN 'up' ELSE 'down' END
+    ),
+    'subscriptions', json_build_object(
+      'totalActive', v_sub.total_active,
+      'newThisMonth', v_sub.new_this_month,
+      'newLastMonth', v_sub.new_last_month,
+      'cancelledThisMonth', v_sub.cancelled_this_month
+    ),
+    'sessions', json_build_object(
+      'totalThisMonth', v_sess.sessions_this_month,
+      'avgDurationMinutes', ROUND(v_sess.avg_duration_min),
+      'hourlyRevenue', v_rev.hourly_revenue
+    ),
+    'cashRegisters', json_build_object(
+      'totalClosures', v_cash.total_closures,
+      'totalExpected', v_cash.total_expected,
+      'totalCounted', v_cash.total_counted,
+      'totalAbsDifference', v_cash.total_abs_difference,
+      'requiringApproval', v_cash.requiring_approval
+    ),
+    'collection', json_build_object(
+      'rate', CASE WHEN v_col.total_count > 0 THEN ROUND((v_col.paid_count::DECIMAL / v_col.total_count * 100)::NUMERIC, 2) ELSE 100 END,
+      'collected', v_col.collected,
+      'totalBilled', v_col.total_billed,
+      'paidCount', v_col.paid_count,
+      'totalCount', v_col.total_count
+    ),
+    'refunds', json_build_object(
+      'count', v_ref.refund_count,
+      'total', v_ref.refund_total
+    )
   ));
 END;
 $$;
