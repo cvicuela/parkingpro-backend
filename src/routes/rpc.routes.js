@@ -71,6 +71,7 @@ const ALLOWED_FUNCTIONS = new Set([
     // Access
     'quick_entry',
     'lost_ticket_charge',
+    'nfc_replacement_charge',
     'register_entry',
     'register_exit',
     'validate_access',
