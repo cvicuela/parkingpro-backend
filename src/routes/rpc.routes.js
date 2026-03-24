@@ -14,6 +14,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/rateLimiter');
 
 // Valid PostgreSQL identifier pattern (prevents SQL injection via param keys)
 const VALID_IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/i;
@@ -104,9 +105,15 @@ const ALLOWED_FUNCTIONS = new Set([
     'report_export_csv',
     // Cash Registers
     'open_cash_register',
+    'safe_open_cash_register',
     'close_cash_register',
     'list_cash_registers',
     'get_cash_register',
+    'get_active_register',
+    'approve_cash_register',
+    'get_register_transactions',
+    'cash_register_history',
+    'get_cash_limits',
     // Invoices
     'list_invoices',
     'get_invoice',
@@ -171,17 +178,22 @@ const ALLOWED_FUNCTIONS = new Set([
     // Data Management
     'reset_data_preview',
     'reset_operational_data',
+    // Billing
+    'run_billing_cycle',
+    'generate_subscription_invoice',
+    'list_billing_runs',
     // Access Control (gate)
     'gate_verify',
     // Setup
     'get_server_time',
-    'require_role',
 ]);
 
 // POST /api/v1/rpc/:functionName
 // Auth middleware conditionally applied: public functions skip auth
 router.post('/:functionName', (req, res, next) => {
-    if (PUBLIC_FUNCTIONS.has(req.params.functionName)) return next();
+    if (PUBLIC_FUNCTIONS.has(req.params.functionName)) {
+        return authLimiter(req, res, next);
+    }
     authenticate(req, res, next);
 }, async (req, res) => {
     const { functionName } = req.params;
@@ -236,10 +248,11 @@ router.post('/:functionName', (req, res, next) => {
         console.error(`[RPC Proxy] Error calling ${functionName}:`, error.message);
 
         // Return structured error matching Supabase format
+        const isDev = process.env.NODE_ENV === 'development';
         res.status(400).json({
-            error: error.message,
-            hint: error.hint || null,
-            details: error.detail || null,
+            error: isDev ? error.message : 'Error ejecutando la operación',
+            hint: isDev ? (error.hint || null) : null,
+            details: isDev ? (error.detail || null) : null,
         });
     }
 });
