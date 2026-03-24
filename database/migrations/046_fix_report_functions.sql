@@ -339,14 +339,15 @@ DECLARE
 BEGIN
   SELECT r.user_id INTO v_user_id FROM require_role(p_token, ARRAY['admin', 'super_admin']) r;
 
-  -- Revenue from payments (single source for all revenue figures)
+  -- Gross revenue = paid + refunded (refunded payments were collected before being returned)
+  -- This way Total Bruto reflects all money that entered, and Total Neto = Bruto - Reembolsos
   SELECT
     COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) THEN total_amount END), 0) AS current_month,
     COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
         AND created_at < DATE_TRUNC('month', CURRENT_DATE) THEN total_amount END), 0) AS previous_month,
     COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) AND subscription_id IS NOT NULL THEN total_amount END), 0) AS subscription_revenue,
     COALESCE(SUM(CASE WHEN created_at >= DATE_TRUNC('month', CURRENT_DATE) AND subscription_id IS NULL THEN total_amount END), 0) AS hourly_revenue
-  INTO v_rev FROM payments WHERE status = 'paid';
+  INTO v_rev FROM payments WHERE status IN ('paid', 'refunded');
 
   SELECT
     COUNT(*) FILTER (WHERE activated_at >= DATE_TRUNC('month', CURRENT_DATE)) AS new_this_month,
