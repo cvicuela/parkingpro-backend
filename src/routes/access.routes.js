@@ -692,4 +692,192 @@ router.post('/nfc-replacement-charge', authenticate, authorize(['operator', 'adm
     }
 });
 
+/**
+ * @route   POST /api/v1/access/lost-ticket-replacement
+ * @desc    Generate a replacement ticket after lost ticket payment.
+ *          The replacement ticket has the SAME session data but a new verification code.
+ *          User must use this replacement ticket (QR) to exit.
+ * @access  Private (Operator, Admin)
+ */
+router.post('/lost-ticket-replacement', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { sessionId, plateNumber } = req.body;
+        if (!sessionId && !plateNumber) {
+            return res.status(400).json({ error: 'sessionId o plateNumber es requerido' });
+        }
+
+        // Find session
+        let session;
+        if (sessionId) {
+            const result = await dbQuery(
+                `SELECT ps.*, p.name as plan_name FROM parking_sessions ps
+                 JOIN plans p ON ps.plan_id = p.id
+                 WHERE ps.id = $1`,
+                [sessionId]
+            );
+            session = result.rows[0];
+        } else {
+            const result = await dbQuery(
+                `SELECT ps.*, p.name as plan_name FROM parking_sessions ps
+                 JOIN plans p ON ps.plan_id = p.id
+                 WHERE ps.vehicle_plate = $1 AND ps.status IN ('active', 'paid')
+                 ORDER BY ps.entry_time DESC LIMIT 1`,
+                [plateNumber.toUpperCase()]
+            );
+            session = result.rows[0];
+        }
+
+        if (!session) {
+            return res.status(404).json({ error: 'Sesión no encontrada' });
+        }
+
+        // Generate new verification code for replacement
+        const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+        // Update session with new verification code and mark as replacement
+        await dbQuery(
+            `UPDATE parking_sessions
+             SET verification_code = $1,
+                 metadata = jsonb_set(
+                     COALESCE(metadata, '{}'),
+                     '{replacement_ticket}',
+                     to_jsonb(jsonb_build_object(
+                         'issued_at', NOW()::text,
+                         'issued_by', $2::text,
+                         'original_code', verification_code,
+                         'reason', 'lost_ticket'
+                     ))
+                 ),
+                 updated_at = NOW()
+             WHERE id = $3`,
+            [newCode, req.user.id, session.id]
+        );
+
+        // Generate QR for replacement ticket
+        const qrCode = await qrcodeService.generateEntryQR({
+            ticketId: session.id,
+            plate: session.vehicle_plate,
+            accessType: 'hourly',
+            entryTime: session.entry_time,
+            planName: session.plan_name,
+            customerName: null
+        });
+
+        res.json({
+            success: true,
+            data: {
+                sessionId: session.id,
+                vehiclePlate: session.vehicle_plate,
+                entryTime: session.entry_time,
+                verificationCode: newCode,
+                planName: session.plan_name,
+                isReplacement: true,
+            },
+            qrCode
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/v1/access/nfc-lost-replacement
+ * @desc    After paying NFC replacement fee, generate a temporary QR ticket for exit.
+ *          The RFID session gets a verification_code so user can exit with printed ticket.
+ * @access  Private (Operator, Admin)
+ */
+router.post('/nfc-lost-replacement', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
+    try {
+        const { plateNumber, cardId } = req.body;
+        if (!plateNumber) {
+            return res.status(400).json({ error: 'plateNumber es requerido' });
+        }
+
+        // Find active session for this plate
+        const sessionResult = await dbQuery(
+            `SELECT ps.*, p.name as plan_name FROM parking_sessions ps
+             JOIN plans p ON ps.plan_id = p.id
+             WHERE ps.vehicle_plate = $1 AND ps.status IN ('active', 'paid')
+             ORDER BY ps.entry_time DESC LIMIT 1`,
+            [plateNumber.toUpperCase()]
+        );
+
+        // Also check subscription access_events (for subscription entries with RFID)
+        const accessResult = await dbQuery(
+            `SELECT ae.*, p.name as plan_name, s.id as subscription_id
+             FROM access_events ae
+             JOIN subscriptions s ON ae.subscription_id = s.id
+             JOIN plans p ON s.plan_id = p.id
+             WHERE ae.vehicle_plate = $1
+               AND ae.type = 'entry'
+               AND ae.access_method = 'rfid'
+               AND NOT EXISTS (
+                   SELECT 1 FROM access_events ae2
+                   WHERE ae2.vehicle_plate = $1 AND ae2.type = 'exit' AND ae2.timestamp > ae.timestamp
+               )
+             ORDER BY ae.timestamp DESC LIMIT 1`,
+            [plateNumber.toUpperCase()]
+        );
+
+        const session = sessionResult.rows[0];
+        const accessEvent = accessResult.rows[0];
+
+        if (!session && !accessEvent) {
+            return res.status(404).json({ error: 'No se encontró sesión activa para esta placa' });
+        }
+
+        const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+        const entryTime = session?.entry_time || accessEvent?.timestamp;
+        const planName = session?.plan_name || accessEvent?.plan_name;
+
+        // If it's a parking_session, update verification code
+        if (session) {
+            await dbQuery(
+                `UPDATE parking_sessions
+                 SET verification_code = $1,
+                     access_method = 'qr',
+                     metadata = jsonb_set(
+                         COALESCE(metadata, '{}'),
+                         '{nfc_replacement}',
+                         to_jsonb(jsonb_build_object(
+                             'issued_at', NOW()::text,
+                             'original_card_id', $2::text,
+                             'reason', 'lost_nfc_card'
+                         ))
+                     ),
+                     updated_at = NOW()
+                 WHERE id = $3`,
+                [newCode, cardId || null, session.id]
+            );
+        }
+
+        // Generate QR for the replacement ticket
+        const qrCode = await qrcodeService.generateEntryQR({
+            ticketId: session?.id || accessEvent?.id,
+            plate: plateNumber.toUpperCase(),
+            accessType: session ? 'hourly' : 'subscription',
+            entryTime: entryTime,
+            planName: planName,
+            customerName: null
+        });
+
+        res.json({
+            success: true,
+            data: {
+                sessionId: session?.id || null,
+                accessEventId: accessEvent?.id || null,
+                vehiclePlate: plateNumber.toUpperCase(),
+                entryTime,
+                verificationCode: newCode,
+                planName,
+                isReplacement: true,
+                replacementReason: 'lost_nfc_card',
+            },
+            qrCode
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 module.exports = router;
