@@ -163,16 +163,23 @@ class HourlyRateService {
     /**
      * Iniciar sesión de parqueo por hora
      */
-    async startParkingSession(vehiclePlate, planId, assignedSpot = null, customerId = null) {
+    async startParkingSession(vehiclePlate, planId, options = {}) {
+        // Support legacy positional call: startParkingSession(plate, plan, assignedSpot, customerId)
+        const opts = (typeof options === 'string' || options === null)
+            ? { assignedSpot: options, customerId: arguments[3] || null }
+            : options;
+        const { assignedSpot = null, customerId = null, accessMethod = 'qr', rfidCardId = null } = opts;
+
         const result = await query(
             `INSERT INTO parking_sessions (
                 vehicle_plate, plan_id, customer_id, assigned_spot,
+                access_method, rfid_card_id,
                 entry_time, status
-            ) VALUES ($1, $2, $3, $4, NOW(), 'active')
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'active')
             RETURNING *`,
-            [vehiclePlate, planId, customerId, assignedSpot]
+            [vehiclePlate, planId, customerId, assignedSpot, accessMethod, rfidCardId]
         );
-        
+
         return result.rows[0];
     }
     
