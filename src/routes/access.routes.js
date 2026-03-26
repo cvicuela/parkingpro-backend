@@ -572,29 +572,49 @@ router.post('/lost-ticket-charge', authenticate, authorize(['operator', 'admin',
             );
         }
 
-        // 2. If no session, check settings for default fee
-        let lostTicketFee, planName, sessionId, entryTime;
+        // 2. Get daily rate and calculate based on days parked
+        let dailyRate, planName, sessionId, entryTime, daysParked;
 
         if (sessionResult.rows.length > 0) {
             const session = sessionResult.rows[0];
-            lostTicketFee = parseFloat(session.lost_ticket_fee) || 500;
+            // Daily rate: use plan's lost_ticket_fee as daily rate, or global setting
+            dailyRate = parseFloat(session.lost_ticket_fee) || null;
             planName = session.plan_name;
             sessionId = session.id;
             entryTime = session.entry_time;
+
+            // Calculate days parked (minimum 1 day)
+            const entryDate = new Date(session.entry_time);
+            const now = new Date();
+            const msPerDay = 24 * 60 * 60 * 1000;
+            daysParked = Math.max(1, Math.ceil((now - entryDate) / msPerDay));
         } else {
-            // No active session — use global setting
-            const settingResult = await dbQuery(
-                `SELECT value FROM settings WHERE key = 'charges.lost_ticket'`
-            );
-            lostTicketFee = settingResult.rows.length > 0
-                ? parseFloat(JSON.parse(settingResult.rows[0].value))
-                : 500;
             planName = null;
             sessionId = null;
             entryTime = null;
+            daysParked = 1; // minimum 1 day if no session found
         }
 
-        // 3. Calculate total with tax
+        // If no daily rate from plan, use global setting
+        if (!dailyRate) {
+            const settingResult = await dbQuery(
+                `SELECT value FROM settings WHERE key = 'charges.lost_ticket_daily'`
+            );
+            if (settingResult.rows.length > 0) {
+                dailyRate = parseFloat(JSON.parse(settingResult.rows[0].value));
+            } else {
+                // Fallback: try legacy flat fee setting, use as daily rate
+                const legacyResult = await dbQuery(
+                    `SELECT value FROM settings WHERE key = 'charges.lost_ticket'`
+                );
+                dailyRate = legacyResult.rows.length > 0
+                    ? parseFloat(JSON.parse(legacyResult.rows[0].value))
+                    : 500;
+            }
+        }
+
+        // 3. Calculate: daily rate × days parked + tax
+        const lostTicketFee = dailyRate * daysParked;
         const subtotal = lostTicketFee;
         const tax = Math.round(subtotal * 0.18 * 100) / 100;
         const total = subtotal + tax;
@@ -611,7 +631,9 @@ router.post('/lost-ticket-charge', authenticate, authorize(['operator', 'admin',
                 tax,
                 total,
                 lost_ticket_fee: lostTicketFee,
-                charge_reason: 'Cargo por ticket perdido',
+                daily_rate: dailyRate,
+                days_parked: daysParked,
+                charge_reason: `Cargo por ticket perdido (${daysParked} día${daysParked > 1 ? 's' : ''} × RD$ ${dailyRate.toFixed(2)})`,
                 payment_status: 'pending',
                 barrier_allowed: false,
             }
