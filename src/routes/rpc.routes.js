@@ -182,6 +182,16 @@ const ALLOWED_FUNCTIONS = new Set([
     'run_billing_cycle',
     'generate_subscription_invoice',
     'list_billing_runs',
+    'calculate_prepaid_invoice',
+    'generate_prepaid_invoice',
+    'get_billing_forecast',
+    'auto_suspend_expired',
+    // Discounts
+    'list_discounts',
+    'get_discount',
+    'create_discount',
+    'update_discount',
+    'delete_discount',
     // Access Control (gate)
     'gate_verify',
     // Setup
