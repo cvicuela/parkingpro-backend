@@ -33,6 +33,7 @@ const terminalRoutes = require('./routes/terminal.routes');
 const dgiiRoutes = require('./routes/dgii.routes');
 const setupRoutes = require('./routes/setup.routes');
 const rpcRoutes = require('./routes/rpc.routes');
+const { discountRouter: discountRoutes, billingRouter: billingRoutes } = require('./routes/discount.routes');
 
 // Middleware de seguridad
 const { apiLimiter, authLimiter, deviceLimiter, paymentLimiter, sensitiveOpsLimiter, reportLimiter } = require('./middleware/rateLimiter');
@@ -179,6 +180,8 @@ app.use('/api/v1/terminals', terminalRoutes);
 app.use('/api/v1/dgii', dgiiRoutes);
 app.use('/api/v1/setup', setupRoutes);
 app.use('/api/v1/rpc', rpcRoutes);
+app.use('/api/v1/discounts', discountRoutes);
+app.use('/api/v1/billing', billingRoutes);
 
 // ==================== ADMIN APP (static + SPA) ====================
 
