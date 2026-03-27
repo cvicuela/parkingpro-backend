@@ -249,17 +249,20 @@ CREATE OR REPLACE FUNCTION public.calculate_prepaid_invoice(
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-    v_auth          RECORD;
-    v_sub           RECORD;
-    v_plan          RECORD;
-    v_discount      RECORD;
-    v_monthly_price NUMERIC;
-    v_subtotal_raw  NUMERIC;
-    v_discount_amt  NUMERIC := 0;
-    v_subtotal      NUMERIC;
-    v_tax_amount    NUMERIC;
-    v_total         NUMERIC;
-    v_tax_rate      NUMERIC;
+    v_auth              RECORD;
+    v_sub               RECORD;
+    v_plan              RECORD;
+    v_discount          RECORD;
+    v_price_includes_tax BOOLEAN;
+    v_monthly_gross     NUMERIC;  -- monthly price as stored (may include ITBIS)
+    v_monthly_net       NUMERIC;  -- monthly price without ITBIS
+    v_tax_rate          NUMERIC;
+    v_net_raw           NUMERIC;  -- net total for N months before discount
+    v_gross_raw         NUMERIC;  -- gross total for N months before discount
+    v_discount_amt      NUMERIC := 0;  -- discount applied on NET
+    v_subtotal          NUMERIC;  -- net after discount
+    v_tax_amount        NUMERIC;  -- ITBIS on discounted net
+    v_total             NUMERIC;  -- final total
 BEGIN
     SELECT * INTO v_auth FROM public.require_role(p_token, ARRAY['admin','super_admin','operator']);
 
@@ -269,64 +272,75 @@ BEGIN
         RETURN json_build_object('success', false, 'error', 'Suscripción no encontrada');
     END IF;
 
-    -- Load plan
+    -- Load plan to check price_includes_tax
     SELECT * INTO v_plan FROM public.plans WHERE id = v_sub.plan_id;
 
-    v_monthly_price := v_sub.price_per_period;
-    v_tax_rate      := COALESCE(v_sub.tax_rate, 0.18);
-    v_subtotal_raw  := v_monthly_price * p_months;
+    v_monthly_gross      := v_sub.price_per_period;
+    v_tax_rate           := COALESCE(v_sub.tax_rate, 0.18);
+    v_price_includes_tax := COALESCE(v_plan.price_includes_tax, true);
 
-    -- Apply discount if provided
+    -- Extract net monthly price (without ITBIS)
+    IF v_price_includes_tax THEN
+        v_monthly_net := ROUND(v_monthly_gross / (1 + v_tax_rate), 2);
+    ELSE
+        v_monthly_net := v_monthly_gross;
+    END IF;
+
+    v_net_raw   := v_monthly_net * p_months;
+    v_gross_raw := v_monthly_gross * p_months;
+
+    -- Apply discount on NET price if provided
     IF p_discount_id IS NOT NULL THEN
         SELECT * INTO v_discount FROM public.discounts WHERE id = p_discount_id AND is_active = true;
 
         IF FOUND THEN
-            -- Validate min_months
             IF p_months < COALESCE(v_discount.min_months, 1) THEN
                 RETURN json_build_object('success', false, 'error',
                     'Se requieren mínimo ' || v_discount.min_months || ' meses para este descuento');
             END IF;
 
-            -- Validate max_uses
             IF v_discount.max_uses IS NOT NULL AND v_discount.current_uses >= v_discount.max_uses THEN
                 RETURN json_build_object('success', false, 'error', 'Este descuento ha alcanzado el límite de usos');
             END IF;
 
-            -- Validate validity dates
             IF v_discount.valid_until IS NOT NULL AND CURRENT_DATE > v_discount.valid_until THEN
                 RETURN json_build_object('success', false, 'error', 'Este descuento ha expirado');
             END IF;
 
-            -- Calculate discount
+            -- Discount always calculated on NET (sin ITBIS)
             IF v_discount.type = 'percentage' THEN
-                v_discount_amt := ROUND(v_subtotal_raw * (v_discount.value / 100), 2);
+                v_discount_amt := ROUND(v_net_raw * (v_discount.value / 100), 2);
             ELSE
-                v_discount_amt := LEAST(v_discount.value, v_subtotal_raw);
+                v_discount_amt := LEAST(v_discount.value, v_net_raw);
             END IF;
         END IF;
     END IF;
 
-    v_subtotal   := v_subtotal_raw - v_discount_amt;
+    -- Final calculation: net after discount + ITBIS on that
+    v_subtotal   := v_net_raw - v_discount_amt;
     v_tax_amount := ROUND(v_subtotal * v_tax_rate, 2);
     v_total      := v_subtotal + v_tax_amount;
 
     RETURN json_build_object(
-        'success',           true,
-        'plan_name',         v_plan.name,
-        'plan_type',         v_plan.type,
-        'monthly_price',     v_monthly_price,
-        'months',            p_months,
-        'subtotal_raw',      v_subtotal_raw,
-        'discount_name',     COALESCE(v_discount.name, NULL),
-        'discount_type',     COALESCE(v_discount.type, NULL),
-        'discount_value',    COALESCE(v_discount.value, 0),
-        'discount_amount',   v_discount_amt,
-        'subtotal',          v_subtotal,
-        'tax_rate',          v_tax_rate,
-        'tax_amount',        v_tax_amount,
-        'total',             v_total,
-        'period_start',      COALESCE(v_sub.current_period_end, CURRENT_DATE),
-        'period_end',        COALESCE(v_sub.current_period_end, CURRENT_DATE) + (p_months || ' months')::INTERVAL
+        'success',             true,
+        'plan_name',           v_plan.name,
+        'plan_type',           v_plan.type,
+        'price_includes_tax',  v_price_includes_tax,
+        'monthly_price',       v_monthly_gross,
+        'monthly_net',         v_monthly_net,
+        'months',              p_months,
+        'gross_raw',           v_gross_raw,
+        'subtotal_raw',        v_net_raw,
+        'discount_name',       COALESCE(v_discount.name, NULL),
+        'discount_type',       COALESCE(v_discount.type, NULL),
+        'discount_value',      COALESCE(v_discount.value, 0),
+        'discount_amount',     v_discount_amt,
+        'subtotal',            v_subtotal,
+        'tax_rate',            v_tax_rate,
+        'tax_amount',          v_tax_amount,
+        'total',               v_total,
+        'period_start',        COALESCE(v_sub.current_period_end, CURRENT_DATE),
+        'period_end',          COALESCE(v_sub.current_period_end, CURRENT_DATE) + (p_months || ' months')::INTERVAL
     );
 EXCEPTION WHEN OTHERS THEN
     RETURN json_build_object('success', false, 'error', SQLERRM);
@@ -348,33 +362,35 @@ CREATE OR REPLACE FUNCTION public.generate_prepaid_invoice(
 RETURNS JSON
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-    v_auth          RECORD;
-    v_sub           RECORD;
-    v_customer      RECORD;
-    v_plan          RECORD;
-    v_discount      RECORD;
-    v_monthly_price NUMERIC;
-    v_subtotal_raw  NUMERIC;
-    v_discount_amt  NUMERIC := 0;
-    v_subtotal      NUMERIC;
-    v_tax_amount    NUMERIC;
-    v_total         NUMERIC;
-    v_tax_rate      NUMERIC;
-    v_ncf_type_setting TEXT;
-    v_ncf           TEXT;
-    v_invoice_prefix TEXT;
-    v_invoice_next  BIGINT;
-    v_invoice_number TEXT;
-    v_payment_id    UUID;
-    v_invoice_id    UUID;
-    v_items         JSONB;
-    v_new_period_start DATE;
-    v_new_period_end   DATE;
-    v_new_next_billing DATE;
-    v_include_extras BOOLEAN;
-    v_extra          RECORD;
-    v_extras_subtotal NUMERIC := 0;
-    v_extras_tax      NUMERIC := 0;
+    v_auth              RECORD;
+    v_sub               RECORD;
+    v_customer          RECORD;
+    v_plan              RECORD;
+    v_discount          RECORD;
+    v_price_includes_tax BOOLEAN;
+    v_monthly_gross     NUMERIC;
+    v_monthly_net       NUMERIC;
+    v_net_raw           NUMERIC;
+    v_discount_amt      NUMERIC := 0;
+    v_subtotal          NUMERIC;
+    v_tax_amount        NUMERIC;
+    v_total             NUMERIC;
+    v_tax_rate          NUMERIC;
+    v_ncf_type_setting  TEXT;
+    v_ncf               TEXT;
+    v_invoice_prefix    TEXT;
+    v_invoice_next      BIGINT;
+    v_invoice_number    TEXT;
+    v_payment_id        UUID;
+    v_invoice_id        UUID;
+    v_items             JSONB;
+    v_new_period_start  DATE;
+    v_new_period_end    DATE;
+    v_new_next_billing  DATE;
+    v_include_extras    BOOLEAN;
+    v_extra             RECORD;
+    v_extras_subtotal   NUMERIC := 0;
+    v_extras_tax        NUMERIC := 0;
 BEGIN
     SELECT * INTO v_auth FROM public.require_role(p_token, ARRAY['admin','super_admin']);
 
@@ -392,11 +408,20 @@ BEGIN
     SELECT * INTO v_customer FROM public.customers WHERE id = v_sub.customer_id;
     SELECT * INTO v_plan     FROM public.plans     WHERE id = v_sub.plan_id;
 
-    v_monthly_price := v_sub.price_per_period;
-    v_tax_rate      := COALESCE(v_sub.tax_rate, 0.18);
-    v_subtotal_raw  := v_monthly_price * p_months;
+    v_monthly_gross      := v_sub.price_per_period;
+    v_tax_rate           := COALESCE(v_sub.tax_rate, 0.18);
+    v_price_includes_tax := COALESCE(v_plan.price_includes_tax, true);
 
-    -- Apply discount
+    -- Extract net monthly price (without ITBIS)
+    IF v_price_includes_tax THEN
+        v_monthly_net := ROUND(v_monthly_gross / (1 + v_tax_rate), 2);
+    ELSE
+        v_monthly_net := v_monthly_gross;
+    END IF;
+
+    v_net_raw := v_monthly_net * p_months;
+
+    -- Apply discount on NET price
     IF p_discount_id IS NOT NULL THEN
         SELECT * INTO v_discount FROM public.discounts WHERE id = p_discount_id AND is_active = true;
         IF FOUND THEN
@@ -408,10 +433,11 @@ BEGIN
                 RETURN json_build_object('success', false, 'error', 'Descuento agotado');
             END IF;
 
+            -- Discount always on NET (sin ITBIS)
             IF v_discount.type = 'percentage' THEN
-                v_discount_amt := ROUND(v_subtotal_raw * (v_discount.value / 100), 2);
+                v_discount_amt := ROUND(v_net_raw * (v_discount.value / 100), 2);
             ELSE
-                v_discount_amt := LEAST(v_discount.value, v_subtotal_raw);
+                v_discount_amt := LEAST(v_discount.value, v_net_raw);
             END IF;
 
             -- Increment usage counter
@@ -421,7 +447,8 @@ BEGIN
         END IF;
     END IF;
 
-    v_subtotal   := v_subtotal_raw - v_discount_amt;
+    -- Final: net after discount + ITBIS on that
+    v_subtotal   := v_net_raw - v_discount_amt;
     v_tax_amount := ROUND(v_subtotal * v_tax_rate, 2);
     v_total      := v_subtotal + v_tax_amount;
 
@@ -431,7 +458,7 @@ BEGIN
             'type',        'subscription_prepaid',
             'description', 'Plan ' || v_plan.name || ' - ' || p_months || ' meses',
             'quantity',    p_months,
-            'unit_price',  v_monthly_price,
+            'unit_price',  v_monthly_net,
             'tax_rate',    v_tax_rate,
             'tax_amount',  v_tax_amount,
             'total',       v_total
@@ -583,7 +610,7 @@ BEGIN
         payment_type         = 'prepaid',
         discount_id          = p_discount_id,
         discount_amount      = v_discount_amt,
-        original_price       = v_subtotal_raw,
+        original_price       = v_net_raw,
         status               = 'active',
         activated_at         = COALESCE(activated_at, NOW()),
         updated_at           = NOW()
