@@ -1,0 +1,11 @@
+-- Migration 058: Allow billing for all non-cancelled subscriptions + fix date logic
+--
+-- Changes:
+-- 1. generate_prepaid_invoice: allow suspended/pending/past_due subscriptions (not just active)
+-- 2. Date logic: new period always starts from current_period_end, not CURRENT_DATE
+--    (early payments extend from existing end date, so RFID stays active without interruption)
+-- 3. Reactivate suspended subscriptions on payment (clear suspended_at)
+-- 4. calculate_prepaid_invoice: remove status restriction
+-- 5. Frontend: button visible for all non-cancelled subscriptions
+
+-- See Supabase migration 058_fix_prepaid_allow_all_statuses_and_date_logic for full SQL
