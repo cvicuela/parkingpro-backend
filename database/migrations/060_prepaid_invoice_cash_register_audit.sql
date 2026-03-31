@@ -1,0 +1,13 @@
+-- Migration 060: Add cash register transaction and audit log to prepaid invoice generation
+--
+-- Previously generate_prepaid_invoice created payment + invoice but:
+-- 1. Did NOT record in the operator's cash register → didn't show in cuadre de caja
+-- 2. Did NOT log audit trail → no record of who generated the invoice
+--
+-- Now:
+-- - Records cash_register_transaction with operator_id, payment_method, and description
+-- - Logs audit entry with full details (customer, plan, months, total, discount)
+-- - Sets paid_at = NOW() on the payment record
+-- - Transaction goes to the operator's open register (same pattern as process_parking_payment)
+
+-- See full function in Supabase migration 060_prepaid_invoice_cash_register_and_audit
