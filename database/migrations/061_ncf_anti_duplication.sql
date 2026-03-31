@@ -1,0 +1,27 @@
+-- Migration 061: NCF Anti-Duplication System
+-- Dominican Republic law (DGII) penalizes duplicate NCF numbers.
+--
+-- Changes:
+-- 1. UNIQUE partial index on invoices.ncf (prevents DB-level duplicates)
+-- 2. ncf_audit_log table - tracks every NCF issued with source, operator, status
+-- 3. Hardened get_next_ncf() with:
+--    - FOR UPDATE NOWAIT (exclusive lock, fail fast on concurrent access)
+--    - Double verification: checks invoices + ncf_audit_log before issuing
+--    - Auto-recovery: if NCF already exists, tries up to 10 next numbers
+--    - Source tracking: logs where each NCF was generated from
+--    - Operator tracking: logs who generated it
+-- 4. void_ncf() function for cancellations/refunds
+-- 5. Updated generate_prepaid_invoice to pass source='prepaid_invoice' and operator_id
+--
+-- NCF flow:
+-- get_next_ncf() → locks row → verifies uniqueness → increments → logs → returns
+-- If transaction fails after get_next_ncf: NCF is consumed but logged as 'used' without invoice
+-- void_ncf() marks it as 'voided' for cancelled invoices
+--
+-- Separation between parking and subscriptions:
+-- Parking payments call get_next_ncf(type, 'parking_payment', operator)
+-- Subscription billing calls get_next_ncf(type, 'prepaid_invoice', operator)
+-- Billing cycle calls get_next_ncf(type, 'billing_cycle', NULL)
+-- Each gets their own NCF from the same sequence but tracked separately
+
+-- See Supabase migration 061_ncf_anti_duplication_and_audit for full SQL
