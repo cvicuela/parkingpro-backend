@@ -167,7 +167,14 @@ router.post('/login', async (req, res, next) => {
             `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
             [user.id]
         );
-        
+
+        // Fetch profile info (first_name, last_name)
+        const profileResult = await query(
+            `SELECT c.first_name, c.last_name FROM customers c WHERE c.user_id = $1`,
+            [user.id]
+        );
+        const profile = profileResult.rows[0] || {};
+
         res.json({
             success: true,
             message: 'Login exitoso',
@@ -177,7 +184,9 @@ router.post('/login', async (req, res, next) => {
                     email: user.email,
                     phone: user.phone,
                     role: user.role,
-                    verified: user.verified
+                    verified: user.verified,
+                    first_name: profile.first_name || null,
+                    last_name: profile.last_name || null
                 },
                 token
             }
@@ -244,6 +253,47 @@ router.get('/me', authenticate, async (req, res, next) => {
             data: user
         });
         
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * @route   PATCH /api/v1/auth/profile
+ * @desc    Actualizar perfil del usuario (nombre, apellido)
+ * @access  Private
+ */
+router.patch('/profile', authenticate, async (req, res, next) => {
+    try {
+        const { firstName, lastName } = req.body;
+
+        if (!firstName || !lastName) {
+            return res.status(400).json({ error: 'Nombre y apellido son requeridos' });
+        }
+
+        if (firstName.length > 100 || lastName.length > 100) {
+            return res.status(400).json({ error: 'Nombre o apellido demasiado largo' });
+        }
+
+        // Upsert into customers table
+        const existing = await query('SELECT id FROM customers WHERE user_id = $1', [req.user.id]);
+        if (existing.rows.length > 0) {
+            await query(
+                'UPDATE customers SET first_name = $1, last_name = $2, updated_at = NOW() WHERE user_id = $3',
+                [firstName.trim(), lastName.trim(), req.user.id]
+            );
+        } else {
+            await query(
+                'INSERT INTO customers (user_id, first_name, last_name) VALUES ($1, $2, $3)',
+                [req.user.id, firstName.trim(), lastName.trim()]
+            );
+        }
+
+        res.json({
+            success: true,
+            message: 'Perfil actualizado exitosamente',
+            data: { first_name: firstName.trim(), last_name: lastName.trim() }
+        });
     } catch (error) {
         next(error);
     }
