@@ -218,10 +218,11 @@ app.use(errorHandler);
 
 // ==================== INICIAR SERVIDOR ====================
 
-server.listen(PORT, () => {
-    const deployment = require('./config/deploymentMode');
+if (require.main === module) {
+    server.listen(PORT, () => {
+        const deployment = require('./config/deploymentMode');
 
-    console.log(`
+        console.log(`
 =============================================
   ParkingPro API Server
   Environment: ${process.env.NODE_ENV || 'development'}
@@ -232,23 +233,24 @@ server.listen(PORT, () => {
   Status:      Running
   Time:        ${new Date().toLocaleString('es-DO')}
 =============================================
-    `);
+        `);
 
-    // Start hybrid sync engine if applicable
-    if (deployment.syncEnabled) {
-        const syncEngine = require('./services/syncEngine');
-        syncEngine.start();
-    }
+        // Start hybrid sync engine if applicable
+        if (deployment.syncEnabled) {
+            const syncEngine = require('./services/syncEngine');
+            syncEngine.start();
+        }
 
-    console.log('\nAvailable endpoints:');
-    console.log('   GET  /health');
-    console.log('   POST /api/v1/auth/register');
-    console.log('   POST /api/v1/auth/login');
-    console.log('   GET  /api/v1/plans');
-    console.log('   POST /api/v1/subscriptions');
-    console.log('   POST /api/v1/access/validate');
-    console.log('   GET  /api/v1/reports/dashboard\n');
-});
+        console.log('\nAvailable endpoints:');
+        console.log('   GET  /health');
+        console.log('   POST /api/v1/auth/register');
+        console.log('   POST /api/v1/auth/login');
+        console.log('   GET  /api/v1/plans');
+        console.log('   POST /api/v1/subscriptions');
+        console.log('   POST /api/v1/access/validate');
+        console.log('   GET  /api/v1/reports/dashboard\n');
+    });
+}
 
 // ==================== GRACEFUL SHUTDOWN ====================
 

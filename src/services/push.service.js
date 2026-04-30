@@ -13,7 +13,9 @@ if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
   VAPID_PRIVATE = generated.privateKey;
   console.log('[PushService] VAPID keys auto-generated (set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY env vars for production)');
   console.log('[PushService] VAPID_PUBLIC_KEY=' + VAPID_PUBLIC);
-  console.log('[PushService] VAPID_PRIVATE_KEY=' + VAPID_PRIVATE);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[PushService] VAPID_PRIVATE_KEY=' + VAPID_PRIVATE);
+  }
 }
 
 webPush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC, VAPID_PRIVATE);

@@ -485,7 +485,9 @@ describe('Plan Routes', () => {
         false,            // crossesMidnight
         15,               // toleranceMinutes
         50,               // maxCapacity
-        5                 // dailyEntryLimit
+        5,                // dailyEntryLimit
+        true,             // priceIncludesTax (default)
+        0.18              // taxRate (default)
       ]);
     });
 

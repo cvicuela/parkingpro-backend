@@ -83,7 +83,8 @@ describe('Auth Routes', () => {
       mockQuery
         .mockResolvedValueOnce({ rows: [{ id: userId, email: 'test@test.com', phone: '+18095551234', role: 'operator', password_hash: hash, status: 'active', verified: true }] })
         .mockResolvedValueOnce({ rows: [] }) // session insert
-        .mockResolvedValueOnce({ rows: [] }); // update last_login
+        .mockResolvedValueOnce({ rows: [] }) // update last_login
+        .mockResolvedValueOnce({ rows: [] }); // customer profile lookup
 
       const res = await request(app)
         .post('/api/v1/auth/login')
