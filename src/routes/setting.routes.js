@@ -28,7 +28,7 @@ router.get('/', authenticate, authorize(['admin', 'super_admin']), async (req, r
  * @desc    Obtener configuración específica
  * @access  Private
  */
-router.get('/:key', authenticate, async (req, res, next) => {
+router.get('/:key', authenticate, authorize(['operator', 'admin', 'super_admin']), async (req, res, next) => {
     try {
         const { key } = req.params;
         

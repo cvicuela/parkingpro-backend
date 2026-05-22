@@ -18,7 +18,11 @@ router.post('/cardnet', async (req, res, next) => {
             }
             const payload = `${transactionId}|${status}|${amount}|${merchantId}`;
             const expected = crypto.createHmac('sha256', expectedKey).update(payload).digest('hex');
-            if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+            const sigBuf = Buffer.from(String(signature));
+            const expBuf = Buffer.from(expected);
+            // Length-guard: timingSafeEqual throws on length mismatch. A malformed
+            // signature must yield 401, not an uncaught 500.
+            if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
                 console.error('[Webhook] CardNet signature mismatch');
                 return res.status(401).json({ error: 'Invalid signature' });
             }
@@ -26,7 +30,7 @@ router.post('/cardnet', async (req, res, next) => {
 
         // Find payment by transaction ID in metadata
         const paymentResult = await query(
-            `SELECT id, status, metadata FROM payments
+            `SELECT id, status, metadata, total_amount FROM payments
              WHERE metadata->>'provider_response' LIKE $1
                 OR metadata->'provider_response'->>'transaction_id' = $2
              LIMIT 1`,
@@ -40,6 +44,23 @@ router.post('/cardnet', async (req, res, next) => {
 
         const payment = paymentResult.rows[0];
         const newStatus = responseCode === '00' ? 'paid' : 'failed';
+
+        // Verify the webhook amount matches what we charged before accepting 'paid'.
+        // Prevents a (mis)signed event with a divergent amount from settling the payment.
+        if (newStatus === 'paid' && amount != null && payment.total_amount != null) {
+            const webhookAmount = parseFloat(amount);
+            const chargedAmount = parseFloat(payment.total_amount);
+            if (!Number.isFinite(webhookAmount) || Math.abs(webhookAmount - chargedAmount) > 0.01) {
+                console.error(`[Webhook] CardNet amount mismatch: webhook ${amount} vs charged ${payment.total_amount} (txn ${transactionId})`);
+                await logAudit({
+                    action: 'webhook_amount_mismatch',
+                    entityType: 'payment',
+                    entityId: payment.id,
+                    changes: { webhook_amount: webhookAmount, charged_amount: chargedAmount, transactionId }
+                });
+                return res.status(400).json({ received: true, matched: true, error: 'Amount mismatch' });
+            }
+        }
 
         if (payment.status !== newStatus) {
             await query(
