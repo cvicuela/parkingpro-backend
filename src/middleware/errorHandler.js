@@ -109,11 +109,21 @@ function errorHandler(err, req, res, next) {
     
     // Respuesta de error
     const statusCode = error.statusCode || 500;
+    const isOperational = error.isOperational === true;
     const response = {
         error: error.message || 'Error interno del servidor',
         code: error.code || 'INTERNAL_ERROR'
     };
-    
+
+    // No filtrar detalles internos al cliente: para errores 5xx no-operacionales
+    // (errores crudos de pg, TypeErrors, etc.) responder con un mensaje genérico
+    // fuera de entorno de desarrollo. Los AppError (operacionales) conservan su
+    // mensaje seguro.
+    if (statusCode >= 500 && !isOperational && process.env.NODE_ENV !== 'development') {
+        response.error = 'Error interno del servidor';
+        response.code = 'INTERNAL_ERROR';
+    }
+
     // En desarrollo, incluir stack trace
     if (process.env.NODE_ENV === 'development') {
         response.stack = error.stack;

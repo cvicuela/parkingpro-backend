@@ -42,7 +42,9 @@ class HourlyRateService {
         );
         
         const planConfig = toleranceResult.rows[0] || {};
-        const toleranceMinutes = planConfig.tolerance_minutes || 5;
+        // Nullish-coalesce so a deliberate tolerance of 0 is honored (|| would eat it),
+        // and default to 15 to match plan creation (plan.routes.js) instead of 5.
+        const toleranceMinutes = planConfig.tolerance_minutes ?? 15;
         const priceIncludesTax = planConfig.price_includes_tax !== false;
         const taxRate = parseFloat(planConfig.tax_rate) || 0.18;
         

@@ -4,6 +4,51 @@ const hourlyRateService = require('./hourlyRate.service');
 const rfidService = require('./rfid.service');
 const pushService = require('./push.service');
 
+// ── Timezone helpers ────────────────────────────────────────
+// Dominican Republic is America/Santo_Domingo (UTC-4, no DST). Plan-hour windows
+// and overage must be evaluated in DR local time, not the server process timezone
+// (a UTC-deployed process would otherwise shift every boundary by 4 hours).
+const DR_TZ = 'America/Santo_Domingo';
+const DR_OFFSET_MS = 4 * 60 * 60 * 1000; // UTC = DR + 4h
+
+function drHourMinute(date) {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone: DR_TZ, hour12: false, hour: '2-digit', minute: '2-digit' });
+    let hour = 0, minute = 0;
+    for (const p of f.formatToParts(date)) {
+        if (p.type === 'hour') hour = parseInt(p.value, 10) % 24;
+        else if (p.type === 'minute') minute = parseInt(p.value, 10);
+    }
+    return { hour, minute };
+}
+
+function drDateParts(date) {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: DR_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+    let y = 0, m = 0, d = 0;
+    for (const p of f.formatToParts(date)) {
+        if (p.type === 'year') y = parseInt(p.value, 10);
+        else if (p.type === 'month') m = parseInt(p.value, 10);
+        else if (p.type === 'day') d = parseInt(p.value, 10);
+    }
+    return { y, m, d };
+}
+
+function drTodayStr(date = new Date()) {
+    const { y, m, d } = drDateParts(date);
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// Calendar date 'YYYY-MM-DD' of a pg DATE value (parsed as a Date at local
+// midnight, or a string) — kept as-is, NOT timezone-shifted.
+function calendarDateStr(value) {
+    if (value instanceof Date) {
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return String(value).slice(0, 10);
+}
+
 /**
  * Servicio de Control de Acceso
  * Maneja tanto suscripciones como parqueo por hora
@@ -123,11 +168,12 @@ class AccessControlService {
      * Validar entrada para suscripción
      */
     async validateSubscriptionEntry(subscription, timestamp) {
-        const currentHour = getHours(timestamp);
-        const currentMinute = getMinutes(timestamp);
-        
-        // Validar vigencia
-        if (new Date(subscription.next_billing_date) < new Date()) {
+        const { hour: currentHour, minute: currentMinute } = drHourMinute(timestamp);
+
+        // Validar vigencia — la suscripción es válida DURANTE todo el día de
+        // next_billing_date (el cobro corre cuando next_billing_date <= CURRENT_DATE).
+        // Comparar por fecha calendario (hora local RD) para no bloquear el último día.
+        if (calendarDateStr(subscription.next_billing_date) < drTodayStr()) {
             return {
                 allowed: false,
                 reason: 'SUBSCRIPTION_EXPIRED',
@@ -247,9 +293,8 @@ class AccessControlService {
         let chargeReason = null;
         
         if (entryEvent.plan_type !== '24h') {
-            const exitHour = getHours(timestamp);
-            const exitMinute = getMinutes(timestamp);
-            
+            const { hour: exitHour, minute: exitMinute } = drHourMinute(timestamp);
+
             const isWithinHours = this.isWithinAllowedHours(
                 exitHour,
                 exitMinute,
@@ -262,6 +307,7 @@ class AccessControlService {
             if (!isWithinHours) {
                 // Calcular horas fuera de horario
                 const overageHours = this.calculateOverageHours(
+                    new Date(entryEvent.timestamp),
                     timestamp,
                     entryEvent.end_hour,
                     entryEvent.tolerance_minutes
@@ -571,15 +617,23 @@ class AccessControlService {
         }
     }
     
-    calculateOverageHours(exitTime, endHour, toleranceMinutes) {
-        const exitHourDecimal = getHours(exitTime) + (getMinutes(exitTime) / 60);
-        const allowedEnd = endHour + (toleranceMinutes / 60);
-        
-        if (exitHourDecimal <= allowedEnd) {
-            return 0;
+    calculateOverageHours(entryTime, exitTime, endHour, toleranceMinutes) {
+        // Build the allowed-end boundary (endHour + tolerance, DR local) on the
+        // entry's calendar day as an absolute UTC instant. If that boundary is at or
+        // before entry (night plans, or entry after endHour), roll it forward a day.
+        // Overage = real elapsed time past the boundary, so overstays that cross
+        // midnight or span multiple days are billed correctly (the old wall-clock
+        // hour-of-day math returned 0 for any exit past midnight).
+        const { y, m, d } = drDateParts(entryTime);
+        let boundaryMs = Date.UTC(y, m - 1, d, endHour, 0, 0)
+            + DR_OFFSET_MS
+            + (toleranceMinutes || 0) * 60000;
+        const entryMs = entryTime.getTime();
+        while (boundaryMs <= entryMs) {
+            boundaryMs += 24 * 60 * 60 * 1000;
         }
-        
-        return exitHourDecimal - allowedEnd;
+        const overageMs = exitTime.getTime() - boundaryMs;
+        return overageMs > 0 ? overageMs / (60 * 60 * 1000) : 0;
     }
     
     /**

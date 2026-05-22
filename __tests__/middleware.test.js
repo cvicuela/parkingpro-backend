@@ -174,7 +174,8 @@ describe('Error Handler', () => {
     process.env.NODE_ENV = originalEnv;
   });
 
-  it('returns 500 for a generic error', () => {
+  it('returns 500 with a generic message for a non-operational error in production', () => {
+    // Security: raw/unmapped errors must NOT leak internal messages to clients.
     const err = new Error('Something broke');
     const req = mockReq();
     const res = mockRes();
@@ -184,10 +185,13 @@ describe('Error Handler', () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        error: 'Something broke',
+        error: 'Error interno del servidor',
         code: 'INTERNAL_ERROR',
       })
     );
+    // The raw internal message must not be returned to the client.
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.error).not.toBe('Something broke');
   });
 
   it('returns the custom status code from AppError', () => {

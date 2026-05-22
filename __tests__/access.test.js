@@ -853,23 +853,26 @@ describe('Access Control Routes & Service', () => {
     });
 
     describe('calculateOverageHours', () => {
+      // Signature is now (entryTime, exitTime, endHour, toleranceMinutes) and uses
+      // absolute time in America/Santo_Domingo (UTC-4). Instants below are UTC with
+      // the equivalent DR wall-clock in comments.
+      const entry = new Date('2026-03-20T14:00:00Z'); // 10:00 DR
+
       it('should return 0 when exit is within allowed time', () => {
-        const exitTime = new Date('2026-03-20T17:00:00');
-        const result = accessControlService.calculateOverageHours(exitTime, 18, 0);
+        const exitTime = new Date('2026-03-20T21:00:00Z'); // 17:00 DR
+        const result = accessControlService.calculateOverageHours(entry, exitTime, 18, 0);
         expect(result).toBe(0);
       });
 
       it('should calculate overage hours correctly', () => {
-        // Exit at 20:00, allowed end is 18:00 + 0 tolerance
-        const exitTime = new Date('2026-03-20T20:00:00');
-        const result = accessControlService.calculateOverageHours(exitTime, 18, 0);
+        const exitTime = new Date('2026-03-21T00:00:00Z'); // 20:00 DR, allowed end 18:00
+        const result = accessControlService.calculateOverageHours(entry, exitTime, 18, 0);
         expect(result).toBe(2);
       });
 
       it('should account for tolerance in overage calculation', () => {
-        // Exit at 18:30, allowed end is 18:00 + 30 min tolerance = 18.5
-        const exitTime = new Date('2026-03-20T18:30:00');
-        const result = accessControlService.calculateOverageHours(exitTime, 18, 30);
+        const exitTime = new Date('2026-03-20T22:30:00Z'); // 18:30 DR, end 18:00 + 30 min tol
+        const result = accessControlService.calculateOverageHours(entry, exitTime, 18, 30);
         expect(result).toBe(0);
       });
     });

@@ -13,7 +13,7 @@ class PaymentService {
         };
     }
 
-    async processPayment({ amount, taxRate, priceIncludesTax = false, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {}, userId, req }) {
+    async processPayment({ amount, taxRate, priceIncludesTax = true, provider = 'cash', customerId, subscriptionId, sessionId, metadata = {}, userId, req }) {
         const rate = taxRate || parseFloat(process.env.TAX_RATE) || 0.18;
         let baseAmount, taxAmount, totalAmount;
 
@@ -26,7 +26,7 @@ class PaymentService {
             // Monto sin ITBIS — calcular impuesto encima
             baseAmount = amount;
             taxAmount = Math.round((amount * rate) * 100) / 100;
-            totalAmount = baseAmount + taxAmount;
+            totalAmount = Math.round((baseAmount + taxAmount) * 100) / 100;
         }
 
         const handler = this.providers[provider];
@@ -90,10 +90,25 @@ class PaymentService {
             if (providerResult.status === 'paid') {
                 try {
                     const invoiceService = require('./invoice.service');
-                    await invoiceService.generateFromPayment(payment.id, { userId, req });
+                    const invoice = await invoiceService.generateFromPayment(payment.id, { userId, req });
+                    if (invoice) payment.invoice = invoice;
                 } catch (invoiceErr) {
-                    // La factura falla silenciosamente — no cancela el pago
+                    // La factura/NCF falló: NO se cancela el pago, pero se marca
+                    // como pendiente de comprobante fiscal para reintento/alerta.
+                    // Antes esto fallaba en silencio (sin señal al caller).
                     console.error('[Payment] Error generando factura:', invoiceErr.message);
+                    payment.invoice_pending = true;
+                    payment.invoice_error = invoiceErr.message;
+                    try {
+                        await client.query(
+                            `UPDATE payments
+                             SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{invoice_pending}', 'true'::jsonb)
+                             WHERE id = $1`,
+                            [payment.id]
+                        );
+                    } catch (flagErr) {
+                        console.error('[Payment] No se pudo marcar invoice_pending:', flagErr.message);
+                    }
                 }
             }
 

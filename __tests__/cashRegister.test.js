@@ -169,7 +169,8 @@ describe('Cash Register Routes', () => {
         .send({ openingBalance: 5000 });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toContain('caja abierta');
+      // Security: raw internal error messages are not leaked to clients.
+      expect(res.body.error).toBe('Error interno del servidor');
     });
   });
 
@@ -444,7 +445,8 @@ describe('Cash Register Routes', () => {
         .send({ countedBalance: 5000 });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toContain('Caja abierta no encontrada');
+      // Security: raw internal error messages are not leaked to clients.
+      expect(res.body.error).toBe('Error interno del servidor');
     });
 
     it('should handle service errors on close', async () => {
@@ -515,7 +517,8 @@ describe('Cash Register Routes', () => {
         .send({ notes: 'Trying again' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toContain('ya fue aprobada');
+      // Security: raw internal error messages are not leaked to clients.
+      expect(res.body.error).toBe('Error interno del servidor');
     });
 
     it('should deny access to operator role for approval', async () => {
