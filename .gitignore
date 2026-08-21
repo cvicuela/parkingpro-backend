@@ -17,3 +17,6 @@ coverage/
 *~
 .docker/
 .vercel/
+
+# Artefactos de la herramienta claude-flow, no son codigo del proyecto
+.claude-flow/
